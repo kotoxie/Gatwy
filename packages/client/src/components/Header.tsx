@@ -146,7 +146,7 @@ export function Header({ onToggleSidebar, onOpenSettings }: HeaderProps) {
               View Project
             </a>
             <a
-              href="https://github.com/kotoxie/gatwy/issues/new"
+              href="https://github.com/kotoxie/Gatwy/issues/new/choose"
               target="_blank"
               rel="noreferrer"
               className="flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
