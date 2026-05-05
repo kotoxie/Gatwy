@@ -373,43 +373,57 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
           .remoteClipboardChangedCallback((clipData: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
             const items = (clipData.items() as any[]) ?? []; // eslint-disable-line @typescript-eslint/no-explicit-any
 
-            // Priority order: prefer explicit unicode/plain text over HTML fragments.
-            // Windows puts both CF_UNICODETEXT and CF_HTML on the clipboard when
-            // copying a URL from a browser — we must pick the right one.
+            // IronRDP may report the Windows CF_HTML clipboard format under the
+            // text/plain MIME type. CF_HTML is a UTF-8 byte stream, but each pair
+            // of UTF-8 bytes gets packed into one UTF-16 code unit (low byte first,
+            // high byte second), producing garbled Unicode characters like 敖獲潩...
+            // instead of the plain text. The first char of a CF_HTML blob is always
+            // U+6556 (V=0x56 low, e=0x65 high → "Ve" of "Version:").
+            // We decode and unwrap it back to the inner plain text.
+            const decodeCfHtmlBlob = (s: string): string | null => {
+              if (s.charCodeAt(0) !== 0x6556) return null; // not a CF_HTML blob
+              const bytes: number[] = [];
+              for (let i = 0; i < s.length; i++) {
+                const cp = s.charCodeAt(i);
+                bytes.push(cp & 0xff);
+                bytes.push((cp >> 8) & 0xff);
+              }
+              let end = bytes.length;
+              while (end > 0 && bytes[end - 1] === 0) end--;
+              const decoded = new TextDecoder('utf-8').decode(new Uint8Array(bytes.slice(0, end)));
+              // Extract only the StartFragment..EndFragment section
+              const fragMatch = decoded.match(/<!--StartFragment-->([\s\S]*?)<!--EndFragment-->/);
+              const html = fragMatch
+                ? fragMatch[1]
+                : decoded.replace(/^Version:[\s\S]*?<body[^>]*>/i, '').replace(/<\/body[\s\S]*$/i, '');
+              return html.replace(/<[^>]+>/g, '').trim() || null;
+            };
+
+            // Priority order: prefer explicit unicode/plain text over HTML
             const PRIORITY = ['text/unicode', 'text/plain;charset=utf-16', 'text/plain'];
-            let textItem = PRIORITY.reduce<any>(  // eslint-disable-line @typescript-eslint/no-explicit-any
+            const textItem = PRIORITY.reduce<any>( // eslint-disable-line @typescript-eslint/no-explicit-any
               (found, mime) => found ?? items.find((i: any) => i.mimeType() === mime) ?? null, // eslint-disable-line @typescript-eslint/no-explicit-any
               null,
             );
 
-            // Fallback: if only CF_HTML / text/html is available, extract the plain
-            // text from the HTML fragment instead of returning the raw CF_HTML blob
-            // (which would appear as garbled bytes when misread as UTF-16).
-            if (!textItem) {
-              const htmlItem = items.find((i: any) => // eslint-disable-line @typescript-eslint/no-explicit-any
-                i.mimeType() === 'text/html' || i.mimeType() === 'text/html;charset=utf-8',
-              );
-              if (htmlItem) {
-                const raw = String(htmlItem.value());
-                // CF_HTML header starts with "Version:" — strip it and all tags
-                const stripped = raw
-                  .replace(/^Version:[\s\S]*?<html[\s\S]*?<body[^>]*>/i, '')
-                  .replace(/<\/body[\s\S]*$/i, '')
-                  .replace(/<!--[\s\S]*?-->/g, '')
-                  .replace(/<[^>]+>/g, '')
-                  .trim();
-                if (stripped) {
-                  localClipboardText = stripped;
-                  navigator.clipboard.writeText(stripped).catch(() => {});
-                }
-                return;
-              }
-            }
-
             if (textItem) {
               const raw = String(textItem.value());
-              // Guard: if the value starts with "Version:" it is a mis-typed CF_HTML blob
-              const text = raw.startsWith('Version:') ? '' : raw;
+              // Attempt to unwrap a mis-encoded CF_HTML blob first
+              const text = decodeCfHtmlBlob(raw) ?? raw;
+              if (text) {
+                localClipboardText = text;
+                navigator.clipboard.writeText(text).catch(() => {});
+              }
+              return;
+            }
+
+            // Fallback: explicit text/html item
+            const htmlItem = items.find((i: any) => // eslint-disable-line @typescript-eslint/no-explicit-any
+              i.mimeType() === 'text/html' || i.mimeType() === 'text/html;charset=utf-8',
+            );
+            if (htmlItem) {
+              const raw = String(htmlItem.value());
+              const text = decodeCfHtmlBlob(raw) ?? raw.replace(/<[^>]+>/g, '').trim();
               if (text) {
                 localClipboardText = text;
                 navigator.clipboard.writeText(text).catch(() => {});
