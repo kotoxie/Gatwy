@@ -396,6 +396,9 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
               const html = fragMatch
                 ? fragMatch[1]
                 : decoded.replace(/^Version:[\s\S]*?<body[^>]*>/i, '').replace(/<\/body[\s\S]*$/i, '');
+              // If the fragment is a single anchor, prefer the href over the link text
+              const hrefMatch = html.match(/<a\s[^>]*href="([^"]+)"[^>]*>/i);
+              if (hrefMatch) return hrefMatch[1].trim() || null;
               return html.replace(/<[^>]+>/g, '').trim() || null;
             };
 
