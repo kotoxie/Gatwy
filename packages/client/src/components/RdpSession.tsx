@@ -249,6 +249,9 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         const { SessionBuilder, DesktopSize, ClipboardData } = Backend as any;
 
         let localClipboardText = '';
+        // Tracks the last text we pushed TO the guest so the dedup guard only
+        // blocks actual duplicates in the host→guest direction, not round-trips.
+        let lastPushedToGuest = '';
 
         // ── Software cursor state (for recording compositing) ────────────────
         // The CSS cursor is a hardware overlay and never appears in captureStream.
@@ -319,12 +322,15 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
           if (!sessionRef.current) return;
           const data = new ClipboardData();
           data.addText('text/plain', text);
+          lastPushedToGuest = text;
           sessionRef.current.onClipboardPaste(data).catch(() => {});
         };
 
         const syncHostClipboardToGuest = () => {
           navigator.clipboard.readText().then((text) => {
-            if (text && text !== localClipboardText) {
+            // Only deduplicate against what we last sent TO the guest,
+            // not against what came FROM the guest — prevents the round-trip block.
+            if (text && text !== lastPushedToGuest) {
               localClipboardText = text;
               pushClipboardToGuest(text);
             }
@@ -366,16 +372,63 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
           )
           .remoteClipboardChangedCallback((clipData: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
             const items = (clipData.items() as any[]) ?? []; // eslint-disable-line @typescript-eslint/no-explicit-any
-            const textItem = items.find((i: any) => i.mimeType() === 'text/plain'); // eslint-disable-line @typescript-eslint/no-explicit-any
+
+            // Priority order: prefer explicit unicode/plain text over HTML fragments.
+            // Windows puts both CF_UNICODETEXT and CF_HTML on the clipboard when
+            // copying a URL from a browser — we must pick the right one.
+            const PRIORITY = ['text/unicode', 'text/plain;charset=utf-16', 'text/plain'];
+            let textItem = PRIORITY.reduce<any>(  // eslint-disable-line @typescript-eslint/no-explicit-any
+              (found, mime) => found ?? items.find((i: any) => i.mimeType() === mime) ?? null, // eslint-disable-line @typescript-eslint/no-explicit-any
+              null,
+            );
+
+            // Fallback: if only CF_HTML / text/html is available, extract the plain
+            // text from the HTML fragment instead of returning the raw CF_HTML blob
+            // (which would appear as garbled bytes when misread as UTF-16).
+            if (!textItem) {
+              const htmlItem = items.find((i: any) => // eslint-disable-line @typescript-eslint/no-explicit-any
+                i.mimeType() === 'text/html' || i.mimeType() === 'text/html;charset=utf-8',
+              );
+              if (htmlItem) {
+                const raw = String(htmlItem.value());
+                // CF_HTML header starts with "Version:" — strip it and all tags
+                const stripped = raw
+                  .replace(/^Version:[\s\S]*?<html[\s\S]*?<body[^>]*>/i, '')
+                  .replace(/<\/body[\s\S]*$/i, '')
+                  .replace(/<!--[\s\S]*?-->/g, '')
+                  .replace(/<[^>]+>/g, '')
+                  .trim();
+                if (stripped) {
+                  localClipboardText = stripped;
+                  navigator.clipboard.writeText(stripped).catch(() => {});
+                }
+                return;
+              }
+            }
+
             if (textItem) {
-              const text = String(textItem.value());
-              localClipboardText = text;
-              navigator.clipboard.writeText(text).catch(() => {});
+              const raw = String(textItem.value());
+              // Guard: if the value starts with "Version:" it is a mis-typed CF_HTML blob
+              const text = raw.startsWith('Version:') ? '' : raw;
+              if (text) {
+                localClipboardText = text;
+                navigator.clipboard.writeText(text).catch(() => {});
+              }
             }
           })
           .forceClipboardUpdateCallback(() => {
-            pushClipboardToGuest(localClipboardText);
-            syncHostClipboardToGuest();
+            // Always prefer a fresh read from the host clipboard.
+            // Only fall back to the cached value if the Clipboard API is unavailable.
+            navigator.clipboard.readText().then((text) => {
+              if (text) {
+                localClipboardText = text;
+                pushClipboardToGuest(text);
+              } else if (localClipboardText) {
+                pushClipboardToGuest(localClipboardText);
+              }
+            }).catch(() => {
+              if (localClipboardText) pushClipboardToGuest(localClipboardText);
+            });
           })
           .extension(displayControl!(true))
           .connect();
