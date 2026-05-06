@@ -500,76 +500,106 @@ function AutoBackupTab() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <section className="space-y-4 border border-border rounded-lg p-4">
-          <h2 className="text-base font-semibold text-text-primary">Configuration</h2>
+        <section className="space-y-4 border border-border rounded-2xl p-5 bg-gradient-to-br from-surface-alt to-surface shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-text-primary">Configuration</h2>
+              <p className="text-xs text-text-secondary mt-0.5">Single scheduled job. SMB destination only.</p>
+            </div>
+            <span className="px-2 py-1 rounded-full border border-border bg-surface-hover text-[11px] text-text-secondary">Phase 1</span>
+          </div>
           {loading ? (
             <p className="text-sm text-text-secondary">Loading auto-backup configuration...</p>
           ) : (
             <>
-              <label className="flex items-center gap-3 cursor-pointer select-none w-fit">
-                <Toggle checked={config.enabled} onChange={(v) => setConfig((p) => ({ ...p, enabled: v }))} />
-                <span className="text-sm text-text-secondary">Enable scheduled auto-backup</span>
-              </label>
-
-              <input type="password" value={globalPassword} onChange={(e) => setGlobalPassword(e.target.value)} placeholder={hasPassword ? 'Leave blank to keep existing global password' : 'Global backup password (min 8 chars)'} className="w-full px-3 py-2 bg-surface border border-border rounded text-text-primary text-sm" />
-              <input type="password" value={globalPasswordConfirm} onChange={(e) => setGlobalPasswordConfirm(e.target.value)} placeholder="Confirm global password" className="w-full px-3 py-2 bg-surface border border-border rounded text-text-primary text-sm" />
-
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
-                  <input type="radio" checked={config.destinationMode === 'saved'} onChange={() => setConfig((p) => ({ ...p, destinationMode: 'saved' }))} />
-                  Use saved SMB connection
+              <div className="rounded-xl border border-border bg-surface-hover/60 p-3">
+                <label className="flex items-center justify-between gap-3 cursor-pointer select-none">
+                  <span className="text-sm font-medium text-text-primary">Enable scheduled auto-backup</span>
+                  <Toggle checked={config.enabled} onChange={(v) => setConfig((p) => ({ ...p, enabled: v }))} />
                 </label>
-                <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
-                  <input type="radio" checked={config.destinationMode === 'adhoc'} onChange={() => setConfig((p) => ({ ...p, destinationMode: 'adhoc' }))} />
-                  Use ad-hoc SMB destination
-                </label>
+              </div>
+
+              <div className="rounded-xl border border-border bg-surface-hover/40 p-3 space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-text-secondary">Global Password</p>
+                <input type="password" value={globalPassword} onChange={(e) => setGlobalPassword(e.target.value)} placeholder={hasPassword ? 'Leave blank to keep existing global password' : 'Global backup password (min 8 chars)'} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm" />
+                <input type="password" value={globalPasswordConfirm} onChange={(e) => setGlobalPasswordConfirm(e.target.value)} placeholder="Confirm global password" className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm" />
+              </div>
+
+              <div className="rounded-xl border border-border bg-surface-hover/40 p-3 space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-text-secondary">Destination Mode</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfig((p) => ({ ...p, destinationMode: 'saved' }))}
+                    className={`px-3 py-2 rounded-lg border text-sm text-left transition-colors ${config.destinationMode === 'saved' ? 'border-accent bg-accent/10 text-accent' : 'border-border bg-surface text-text-secondary hover:text-text-primary'}`}
+                  >
+                    Saved SMB connection
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfig((p) => ({ ...p, destinationMode: 'adhoc' }))}
+                    className={`px-3 py-2 rounded-lg border text-sm text-left transition-colors ${config.destinationMode === 'adhoc' ? 'border-accent bg-accent/10 text-accent' : 'border-border bg-surface text-text-secondary hover:text-text-primary'}`}
+                  >
+                    Ad-hoc SMB destination
+                  </button>
+                </div>
               </div>
 
               {config.destinationMode === 'saved' && (
-                <select value={config.connectionId} onChange={(e) => setConfig((p) => ({ ...p, connectionId: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded text-text-primary text-sm">
-                  <option value="">Select admin-owned SMB destination...</option>
-                  {connections.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.host}:{c.port})</option>)}
-                </select>
-              )}
-
-              <details className="border border-border rounded" open={adhocOpen} onToggle={(e) => setAdhocOpen((e.target as HTMLDetailsElement).open)}>
-                <summary className="px-3 py-2 text-sm cursor-pointer text-text-secondary">Optional ad-hoc SMB settings</summary>
-                <div className="px-3 pb-3 space-y-2">
-                  <input type="text" value={adhoc.host} onChange={(e) => setAdhoc((p) => ({ ...p, host: e.target.value }))} placeholder="SMB host" className="w-full px-3 py-2 bg-surface border border-border rounded text-text-primary text-sm" />
-                  <div className="grid grid-cols-2 gap-2">
-                    <input type="number" min="1" value={adhoc.port} onChange={(e) => setAdhoc((p) => ({ ...p, port: parseInt(e.target.value || '445', 10) }))} placeholder="Port" className="w-full px-3 py-2 bg-surface border border-border rounded text-text-primary text-sm" />
-                    <input type="text" value={adhoc.share} onChange={(e) => setAdhoc((p) => ({ ...p, share: e.target.value }))} placeholder="Share" className="w-full px-3 py-2 bg-surface border border-border rounded text-text-primary text-sm" />
-                  </div>
-                  <input type="text" value={adhoc.username} onChange={(e) => setAdhoc((p) => ({ ...p, username: e.target.value }))} placeholder="Username" className="w-full px-3 py-2 bg-surface border border-border rounded text-text-primary text-sm" />
-                  <input type="password" value={adhoc.password} onChange={(e) => setAdhoc((p) => ({ ...p, password: e.target.value }))} placeholder={adhocHasPassword ? 'Leave blank to keep ad-hoc password' : 'Ad-hoc password'} className="w-full px-3 py-2 bg-surface border border-border rounded text-text-primary text-sm" />
-                  <input type="text" value={adhoc.domain} onChange={(e) => setAdhoc((p) => ({ ...p, domain: e.target.value }))} placeholder="Domain (optional)" className="w-full px-3 py-2 bg-surface border border-border rounded text-text-primary text-sm" />
+                <div className="rounded-xl border border-border bg-surface-hover/40 p-3 space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-text-secondary">Saved Destination</p>
+                  <select value={config.connectionId} onChange={(e) => setConfig((p) => ({ ...p, connectionId: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm">
+                    <option value="">Select admin-owned SMB destination...</option>
+                    {connections.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.host}:{c.port})</option>)}
+                  </select>
                 </div>
-              </details>
-
-              <input type="text" value={config.remotePath} onChange={(e) => setConfig((p) => ({ ...p, remotePath: e.target.value }))} placeholder="Remote folder path" className="w-full px-3 py-2 bg-surface border border-border rounded text-text-primary text-sm" />
-
-              <div className="grid grid-cols-2 gap-2">
-                <select value={config.scheduleType} onChange={(e) => setConfig((p) => ({ ...p, scheduleType: e.target.value as 'daily' | 'weekly' }))} className="w-full px-3 py-2 bg-surface border border-border rounded text-text-primary text-sm">
-                  <option value="daily">Daily</option>
-                  <option value="weekly">Weekly</option>
-                </select>
-                <input type="time" value={config.scheduleTime} onChange={(e) => setConfig((p) => ({ ...p, scheduleTime: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded text-text-primary text-sm" />
-              </div>
-
-              {config.scheduleType === 'weekly' && (
-                <select value={config.scheduleWeekday} onChange={(e) => setConfig((p) => ({ ...p, scheduleWeekday: parseInt(e.target.value, 10) }))} className="w-full px-3 py-2 bg-surface border border-border rounded text-text-primary text-sm">
-                  {weekdays.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
-                </select>
               )}
 
-              <label className="flex items-center gap-3 cursor-pointer select-none w-fit">
-                <Toggle checked={config.includeRecordings} onChange={(v) => setConfig((p) => ({ ...p, includeRecordings: v }))} />
-                <span className="text-sm text-text-secondary">Include recordings</span>
-              </label>
+              {config.destinationMode === 'adhoc' && (
+                <details className="rounded-xl border border-border bg-surface-hover/40" open={adhocOpen} onToggle={(e) => setAdhocOpen((e.target as HTMLDetailsElement).open)}>
+                  <summary className="px-3 py-2 text-sm cursor-pointer text-text-primary font-medium">Optional ad-hoc SMB settings</summary>
+                  <div className="px-3 pb-3 space-y-2">
+                    <input type="text" value={adhoc.host} onChange={(e) => setAdhoc((p) => ({ ...p, host: e.target.value }))} placeholder="SMB host" className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm" />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input type="number" min="1" value={adhoc.port} onChange={(e) => setAdhoc((p) => ({ ...p, port: parseInt(e.target.value || '445', 10) }))} placeholder="Port" className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm" />
+                      <input type="text" value={adhoc.share} onChange={(e) => setAdhoc((p) => ({ ...p, share: e.target.value }))} placeholder="Share" className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm" />
+                    </div>
+                    <input type="text" value={adhoc.username} onChange={(e) => setAdhoc((p) => ({ ...p, username: e.target.value }))} placeholder="Username" className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm" />
+                    <input type="password" value={adhoc.password} onChange={(e) => setAdhoc((p) => ({ ...p, password: e.target.value }))} placeholder={adhocHasPassword ? 'Leave blank to keep ad-hoc password' : 'Ad-hoc password'} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm" />
+                    <input type="text" value={adhoc.domain} onChange={(e) => setAdhoc((p) => ({ ...p, domain: e.target.value }))} placeholder="Domain (optional)" className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm" />
+                  </div>
+                </details>
+              )}
 
-              <div>
-                <label className="block text-sm text-text-secondary mb-1">Retention count</label>
-                <input type="number" min="1" max="365" value={config.retentionCount} onChange={(e) => setConfig((p) => ({ ...p, retentionCount: parseInt(e.target.value || '1', 10) }))} className="w-28 px-3 py-2 bg-surface border border-border rounded text-text-primary text-sm" />
+              <div className="rounded-xl border border-border bg-surface-hover/40 p-3 space-y-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-text-secondary">Schedule & Retention</p>
+                <input type="text" value={config.remotePath} onChange={(e) => setConfig((p) => ({ ...p, remotePath: e.target.value }))} placeholder="Remote folder path" className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm" />
+
+                <div className="grid grid-cols-2 gap-2">
+                  <select value={config.scheduleType} onChange={(e) => setConfig((p) => ({ ...p, scheduleType: e.target.value as 'daily' | 'weekly' }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm">
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                  </select>
+                  <input type="time" value={config.scheduleTime} onChange={(e) => setConfig((p) => ({ ...p, scheduleTime: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm" />
+                </div>
+
+                {config.scheduleType === 'weekly' && (
+                  <select value={config.scheduleWeekday} onChange={(e) => setConfig((p) => ({ ...p, scheduleWeekday: parseInt(e.target.value, 10) }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm">
+                    {weekdays.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+                  </select>
+                )}
+
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <label className="flex items-center gap-3 cursor-pointer select-none w-fit">
+                    <Toggle checked={config.includeRecordings} onChange={(v) => setConfig((p) => ({ ...p, includeRecordings: v }))} />
+                    <span className="text-sm text-text-secondary">Include recordings</span>
+                  </label>
+
+                  <div>
+                    <label className="block text-sm text-text-secondary mb-1">Retention count</label>
+                    <input type="number" min="1" max="365" value={config.retentionCount} onChange={(e) => setConfig((p) => ({ ...p, retentionCount: parseInt(e.target.value || '1', 10) }))} className="w-28 px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm" />
+                  </div>
+                </div>
               </div>
 
               <p className="text-xs text-text-secondary">Max backup size is enforced server-side at 4 GB.</p>
