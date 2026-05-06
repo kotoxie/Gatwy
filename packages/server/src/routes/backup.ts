@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import initSqlJs from 'sql.js';
-import { requirePermission } from '../middleware/auth.js';
+import { requirePermission, userCan } from '../middleware/auth.js';
 import { logAudit } from '../services/audit.js';
 import { createBackup, restoreBackup, getRecordingsSizeInfo } from '../services/backup.js';
 import { getDb, restoreDbFromBytes } from '../db/index.js';
@@ -340,7 +340,7 @@ router.get('/auto/history', requirePermission('settings.backup'), (req: Request,
 
 // GET /auto/capabilities — helper for UI warnings/caps
 router.get('/auto/capabilities', requirePermission('settings.backup'), (req: Request, res: Response) => {
-  const canUseSmb = req.user?.permissions?.includes('protocols.smb') ?? false;
+  const canUseSmb = userCan(req, 'protocols.smb');
   res.json({
     maxFileSizeBytes: 4 * 1024 * 1024 * 1024,
     passwordSentinel: UNCHANGED_SENTINEL,
