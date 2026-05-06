@@ -334,7 +334,14 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
               localClipboardText = text;
               pushClipboardToGuest(text);
             }
-          }).catch(() => {});
+          }).catch(() => {
+            // clipboard.readText() fails when the document is not focused or
+            // clipboard-read permission is not granted. Fall back to sending the
+            // last known host clipboard text so Ctrl+V still works.
+            if (localClipboardText && localClipboardText !== lastPushedToGuest) {
+              pushClipboardToGuest(localClipboardText);
+            }
+          });
         };
 
         const session = await new SessionBuilder()
@@ -434,18 +441,16 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
             }
           })
           .forceClipboardUpdateCallback(() => {
-            // Always prefer a fresh read from the host clipboard.
-            // Only fall back to the cached value if the Clipboard API is unavailable.
+            // Push last known text immediately so Ctrl+V works even if the
+            // Clipboard API is unavailable (document not focused).
+            if (localClipboardText) pushClipboardToGuest(localClipboardText);
+            // Then try to get fresh clipboard content and push again if different.
             navigator.clipboard.readText().then((text) => {
-              if (text) {
+              if (text && text !== lastPushedToGuest) {
                 localClipboardText = text;
                 pushClipboardToGuest(text);
-              } else if (localClipboardText) {
-                pushClipboardToGuest(localClipboardText);
               }
-            }).catch(() => {
-              if (localClipboardText) pushClipboardToGuest(localClipboardText);
-            });
+            }).catch(() => {});
           })
           .extension(displayControl!(true))
           .connect();
@@ -635,7 +640,17 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
           }
         };
 
-        let clipboardPermissionRequested = false;
+        // Debounce clipboard sync on click — re-sync on every left-click but no
+        // more than once per 600ms to avoid hammering the Clipboard API.
+        let lastClipboardSyncTime = 0;
+        const debouncedSyncHostClipboard = () => {
+          const now = Date.now();
+          if (now - lastClipboardSyncTime > 600) {
+            lastClipboardSyncTime = now;
+            syncHostClipboardToGuest();
+          }
+        };
+
         const onMouseDown = (e: MouseEvent) => {
           canvas.focus();
           e.preventDefault();
@@ -644,12 +659,9 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
           const colorTpl = RIPPLE_COLORS[e.button] ?? RIPPLE_COLORS[0];
           clickRipples.push({ x: recMouseX, y: recMouseY, t: performance.now(), color: colorTpl });
           pushEventRef.current?.('click');
-          if (e.button === 2) {
-            syncHostClipboardToGuest();
-          } else if (!clipboardPermissionRequested) {
-            clipboardPermissionRequested = true;
-            syncHostClipboardToGuest();
-          }
+          // Sync on every click (debounced) — not just the first or right-click.
+          // This ensures clipboard stays fresh as the user navigates the remote desktop.
+          debouncedSyncHostClipboard();
         };
         const onMouseUp = (e: MouseEvent) => {
           e.preventDefault();
