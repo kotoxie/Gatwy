@@ -73,6 +73,8 @@ export interface TabBarItem {
 const SIDEBAR_MIN = 150;
 const SIDEBAR_MAX = 480;
 const SIDEBAR_DEFAULT = 240;
+const AUTO_BACKUP_WELCOME_VERSION = '0.16.0';
+const AUTO_BACKUP_WELCOME_KEY = 'welcome_autobackup_0_16_0';
 
 function buildPaneTree(paneIds: string[]): PaneNode {
   if (paneIds.length === 1) {
@@ -138,6 +140,8 @@ export function MainLayout() {
   const { settings } = useSettings();
   const insecureKey = settings['system.insecure_key'] === 'true';
   const permanentlyDismissed = user?.dismissedWarnings?.includes('insecure_key') ?? false;
+  const autoBackupWelcomeDismissed = user?.dismissedWarnings?.includes(AUTO_BACKUP_WELCOME_KEY) ?? false;
+  const showAutoBackupWelcome = __APP_VERSION__ === AUTO_BACKUP_WELCOME_VERSION && !autoBackupWelcomeDismissed;
   // Read directly from sessionStorage each render so logout (which clears the key) is reflected immediately
   const remindLater = sessionStorage.getItem('gatwy-key-warn-later') === '1';
   const [, forceUpdate] = useState(0);
@@ -156,6 +160,16 @@ export function MainLayout() {
     sessionStorage.setItem('gatwy-key-warn-later', '1');
     forceUpdate((n) => n + 1);
   };
+
+  const dismissAutoBackupWelcome = async () => {
+    await fetch('/api/v1/profile/dismiss-warning', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ warning: AUTO_BACKUP_WELCOME_KEY }),
+    }).catch(() => { /* ignore */ });
+    await refreshUser();
+  };
+
   const hasRestoredRef = useRef(false);
 
   const onOpenSettings = useCallback((section?: string) => {
@@ -583,6 +597,30 @@ export function MainLayout() {
     <div className="flex flex-col h-screen bg-surface select-none">
       <IdleMonitor />
       <Header onToggleSidebar={() => setSidebarOpen((o) => !o)} onOpenSettings={onOpenSettings} />
+      {showAutoBackupWelcome && (
+        <div className="flex items-start gap-3 bg-accent/90 text-white px-4 py-2.5 text-sm shadow-md shrink-0">
+          <span className="text-lg shrink-0 mt-0.5">✨</span>
+          <div className="flex-1">
+            <span className="font-bold">New in 0.16.0: </span>
+            Scheduled Auto Backup is now available.
+            Configure daily or weekly encrypted SMB backups from Settings.
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => onOpenSettings('backup')}
+              className="px-2.5 py-1 rounded border border-white/40 text-white/90 hover:bg-white/10 text-xs whitespace-nowrap"
+            >
+              Open Backup Settings
+            </button>
+            <button
+              onClick={dismissAutoBackupWelcome}
+              className="px-2.5 py-1 rounded bg-white/20 hover:bg-white/30 text-white text-xs whitespace-nowrap"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
       {showKeyBanner && (
         <div className="flex items-start gap-3 bg-red-700 text-white px-4 py-2.5 text-sm shadow-md shrink-0">
           <span className="text-lg shrink-0 mt-0.5">⚠</span>
