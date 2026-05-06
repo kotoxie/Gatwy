@@ -634,6 +634,48 @@ function runMigrations() {
         database.run('CREATE INDEX IF NOT EXISTS idx_connections_user ON connections(user_id)');
       },
     },
+    {
+      version: 15,
+      run: (database: Database) => {
+        database.run(`CREATE TABLE IF NOT EXISTS auto_backup_history (
+          id TEXT PRIMARY KEY,
+          trigger_type TEXT NOT NULL CHECK(trigger_type IN ('scheduled','manual')),
+          status TEXT NOT NULL CHECK(status IN ('running','success','failed')),
+          started_at TEXT NOT NULL DEFAULT (datetime('now')),
+          finished_at TEXT,
+          duration_ms INTEGER,
+          size_bytes INTEGER,
+          filename TEXT,
+          destination_mode TEXT NOT NULL CHECK(destination_mode IN ('saved','adhoc')),
+          destination_label TEXT,
+          include_recordings INTEGER NOT NULL DEFAULT 0,
+          error_message TEXT
+        )`);
+        database.run('CREATE INDEX IF NOT EXISTS idx_auto_backup_history_started ON auto_backup_history(started_at)');
+        database.run('CREATE INDEX IF NOT EXISTS idx_auto_backup_history_status ON auto_backup_history(status)');
+
+        database.run(`INSERT OR IGNORE INTO settings (key, value) VALUES
+          ('auto_backup.enabled', 'false'),
+          ('auto_backup.destination_mode', 'saved'),
+          ('auto_backup.connection_id', ''),
+          ('auto_backup.remote_path', ''),
+          ('auto_backup.schedule_type', 'daily'),
+          ('auto_backup.schedule_time', '02:30'),
+          ('auto_backup.schedule_weekday', '1'),
+          ('auto_backup.include_recordings', 'false'),
+          ('auto_backup.retention_count', '14'),
+          ('auto_backup.password_enc', ''),
+          ('auto_backup.adhoc_enc', ''),
+          ('auto_backup.next_run_at', ''),
+          ('auto_backup.last_run_at', ''),
+          ('auto_backup.last_status', ''),
+          ('auto_backup.last_error', ''),
+          ('auto_backup.last_filename', ''),
+          ('auto_backup.last_size_bytes', '0'),
+          ('auto_backup.consecutive_failures', '0'),
+          ('auto_backup.auto_disabled', 'false')`);
+      },
+    },
   ];
 
   for (const migration of migrations) {

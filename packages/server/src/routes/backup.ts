@@ -9,10 +9,20 @@ import { createBackup, restoreBackup, getRecordingsSizeInfo } from '../services/
 import { getDb, restoreDbFromBytes } from '../db/index.js';
 import { config } from '../config.js';
 import { getEncryptionKeyHex } from '../services/encryption.js';
+import {
+  getAutoBackupConfigForApi,
+  getAutoBackupStatus,
+  listAdminSmbConnections,
+  listAutoBackupHistory,
+  runAutoBackupNow,
+  testAutoBackupDestination,
+  updateAutoBackupConfig,
+} from '../services/autoBackup.js';
 
 const AES_GCM = 'aes-256-gcm';
 const IV_LEN = 16;
 const TAG_LEN = 16;
+const UNCHANGED_SENTINEL = '__unchanged__';
 
 /** Decrypt a credential that was encrypted with an arbitrary key (backup's key). */
 function decryptWith(ciphertext: string, key: Buffer): string {
@@ -186,6 +196,156 @@ router.post('/import', requirePermission('settings.backup'), async (req: Request
     const status = msg.includes('Invalid backup password') || msg.includes('corrupted') ? 422 : 400;
     res.status(status).json({ error: msg });
   }
+});
+
+// GET /auto/config — read auto-backup config
+router.get('/auto/config', requirePermission('settings.backup'), (_req: Request, res: Response) => {
+  try {
+    const payload = getAutoBackupConfigForApi();
+    res.json(payload);
+  } catch (e) {
+    res.status(500).json({ error: `Failed to load auto-backup config: ${(e as Error).message}` });
+  }
+});
+
+// PUT /auto/config — update auto-backup config
+router.put('/auto/config', requirePermission('settings.backup'), (req: Request, res: Response) => {
+  const body = req.body as {
+    enabled?: boolean;
+    destinationMode?: 'saved' | 'adhoc';
+    connectionId?: string;
+    remotePath?: string;
+    scheduleType?: 'daily' | 'weekly';
+    scheduleTime?: string;
+    scheduleWeekday?: number;
+    includeRecordings?: boolean;
+    retentionCount?: number;
+    password?: string;
+    adhoc?: {
+      host?: string;
+      port?: number;
+      share?: string;
+      username?: string;
+      password?: string;
+      domain?: string;
+    };
+  };
+
+  try {
+    updateAutoBackupConfig({
+      enabled: !!body.enabled,
+      destinationMode: body.destinationMode === 'adhoc' ? 'adhoc' : 'saved',
+      connectionId: String(body.connectionId ?? ''),
+      remotePath: String(body.remotePath ?? ''),
+      scheduleType: body.scheduleType === 'weekly' ? 'weekly' : 'daily',
+      scheduleTime: String(body.scheduleTime ?? '02:30'),
+      scheduleWeekday: Number(body.scheduleWeekday ?? 1),
+      includeRecordings: !!body.includeRecordings,
+      retentionCount: Number(body.retentionCount ?? 14),
+      password: String(body.password ?? ''),
+      adhoc: {
+        host: String(body.adhoc?.host ?? ''),
+        port: Number(body.adhoc?.port ?? 445),
+        share: String(body.adhoc?.share ?? ''),
+        username: String(body.adhoc?.username ?? ''),
+        password: String(body.adhoc?.password ?? ''),
+        domain: String(body.adhoc?.domain ?? ''),
+      },
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message });
+  }
+});
+
+// GET /auto/connections — list admin-owned SMB connections
+router.get('/auto/connections', requirePermission('settings.backup'), (_req: Request, res: Response) => {
+  try {
+    res.json({
+      connections: listAdminSmbConnections(),
+    });
+  } catch (e) {
+    res.status(500).json({ error: `Failed to list SMB destinations: ${(e as Error).message}` });
+  }
+});
+
+// POST /auto/test — test SMB destination using saved/ad-hoc config
+router.post('/auto/test', requirePermission('settings.backup'), async (req: Request, res: Response) => {
+  const body = req.body as {
+    destinationMode?: 'saved' | 'adhoc';
+    connectionId?: string;
+    remotePath?: string;
+    adhoc?: {
+      host?: string;
+      port?: number;
+      share?: string;
+      username?: string;
+      password?: string;
+      domain?: string;
+    };
+  };
+
+  try {
+    await testAutoBackupDestination({
+      destinationMode: body.destinationMode === 'adhoc' ? 'adhoc' : 'saved',
+      connectionId: String(body.connectionId ?? ''),
+      remotePath: String(body.remotePath ?? ''),
+      adhoc: {
+        host: String(body.adhoc?.host ?? ''),
+        port: Number(body.adhoc?.port ?? 445),
+        share: String(body.adhoc?.share ?? ''),
+        username: String(body.adhoc?.username ?? ''),
+        password: String(body.adhoc?.password ?? UNCHANGED_SENTINEL),
+        domain: String(body.adhoc?.domain ?? ''),
+      },
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message });
+  }
+});
+
+// POST /auto/run-now — force immediate run
+router.post('/auto/run-now', requirePermission('settings.backup'), async (_req: Request, res: Response) => {
+  try {
+    await runAutoBackupNow();
+    res.json({ ok: true });
+  } catch (e) {
+    const message = (e as Error).message;
+    const status = message.includes('already in progress') ? 409 : 400;
+    res.status(status).json({ error: message });
+  }
+});
+
+// GET /auto/status — monitoring endpoint
+router.get('/auto/status', requirePermission('settings.backup'), (_req: Request, res: Response) => {
+  try {
+    const status = getAutoBackupStatus();
+    res.json({ status });
+  } catch (e) {
+    res.status(500).json({ error: `Failed to get status: ${(e as Error).message}` });
+  }
+});
+
+// GET /auto/history — latest run history
+router.get('/auto/history', requirePermission('settings.backup'), (req: Request, res: Response) => {
+  const limit = parseInt(String(req.query.limit ?? '50'), 10);
+  try {
+    const rows = listAutoBackupHistory(Number.isFinite(limit) ? limit : 50);
+    res.json({ rows });
+  } catch (e) {
+    res.status(500).json({ error: `Failed to get history: ${(e as Error).message}` });
+  }
+});
+
+// GET /auto/capabilities — helper for UI warnings/caps
+router.get('/auto/capabilities', requirePermission('settings.backup'), (req: Request, res: Response) => {
+  const canUseSmb = req.user?.permissions?.includes('protocols.smb') ?? false;
+  res.json({
+    maxFileSizeBytes: 4 * 1024 * 1024 * 1024,
+    passwordSentinel: UNCHANGED_SENTINEL,
+    canUseSmb,
+  });
 });
 
 export default router;

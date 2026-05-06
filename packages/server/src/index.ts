@@ -14,6 +14,7 @@ import { setupSshProxy } from './ws/sshProxy.js';
 import { setupVncProxy } from './ws/vncProxy.js';
 import { setupTelnetProxy } from './ws/telnetProxy.js';
 import { getSetting } from './services/settings.js';
+import { startAutoBackupScheduler } from './services/autoBackup.js';
 import authRoutes from './routes/auth.js';
 import connectionRoutes from './routes/connections.js';
 import healthRoutes from './routes/health.js';
@@ -45,6 +46,7 @@ async function main() {
   await initDb();
   initJwt();
   initEncryption();
+  startAutoBackupScheduler();
 
   // Encrypt any plaintext recording files left from crashed sessions
   if (fs.existsSync(config.recordingsDir)) {
