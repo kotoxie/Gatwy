@@ -16,10 +16,13 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'recordings', label: 'Recordings' },
 ];
 
-// All IANA timezones supported by the runtime (Intl API)
+// All IANA timezones supported by the runtime (Intl API).
+// UTC is always pinned first since it is the system default and may not be
+// returned by Intl.supportedValuesOf in all browser/environment combinations.
 const TIMEZONES: string[] = (() => {
   try {
-    return Intl.supportedValuesOf('timeZone');
+    const zones = Intl.supportedValuesOf('timeZone').filter((tz) => tz !== 'UTC');
+    return ['UTC', ...zones];
   } catch {
     return ['UTC'];
   }
@@ -84,7 +87,7 @@ export function GlobalSettings() {
 
   useEffect(() => {
     setAppName(settings['app.name'] ?? 'Gatwy');
-    setTimezone(settings['app.timezone'] ?? 'UTC');
+    setTimezone(settings['app.timezone'] || 'UTC');
     setLogoPreview(settings['app.logo'] ?? '');
     setAuditRetention(settings['audit.retention_days'] ?? '90');
     setHealthMonitorEnabled(settings['health_monitor.enabled'] !== 'false');
