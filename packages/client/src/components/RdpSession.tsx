@@ -249,11 +249,14 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         const { SessionBuilder, DesktopSize, ClipboardData } = Backend as any;
 
         let localClipboardText = '';
-        // Tracks the last text we pushed TO the guest so the dedup guard only
-        // blocks actual duplicates in the host→guest direction, not round-trips.
+        // Tracks the last text we successfully pushed TO the guest to deduplicate
+        // proactive syncs. Only updated after the CLIPRDR handshake resolves.
         let lastPushedToGuest = '';
-        // Tracks in-flight paste promise to prevent concurrent CLIPRDR handshakes.
-        let clipboardPasteInFlight = false;
+        // Guards only the proactive sync paths (click debounce, window focus)
+        // against concurrent CLIPRDR handshakes. forceClipboardUpdateCallback
+        // (Ctrl+V inside RDP) must NEVER be blocked by this flag — it is a
+        // required response to an IronRDP internal clipboard channel request.
+        let proactivePasteInFlight = false;
 
         // ── Software cursor state (for recording compositing) ────────────────
         // The CSS cursor is a hardware overlay and never appears in captureStream.
@@ -322,36 +325,40 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
 
         const PASTE_TIMEOUT_MS = 3000;
 
+        // Direct paste — used by forceClipboardUpdateCallback (Ctrl+V inside RDP).
+        // Never guarded by the in-flight flag; IronRDP requires this to always respond.
+        const pasteToGuest = (text: string) => {
+          if (!sessionRef.current) return;
+          const data = new ClipboardData();
+          data.addText('text/plain', text);
+          (sessionRef.current.onClipboardPaste(data) as Promise<void>)
+            .then(() => { lastPushedToGuest = text; })
+            .catch(() => {});
+        };
+
+        // Proactive paste — used by click debounce and window-focus sync.
+        // Guarded against concurrency so simultaneous CB_FORMAT_LIST PDUs don't
+        // confuse the server-side CLIPRDR state machine.
         const pushClipboardToGuest = (text: string) => {
           if (!sessionRef.current) return;
-          // If a CLIPRDR handshake is already in flight, skip — concurrent
-          // CB_FORMAT_LIST PDUs can deadlock the clipboard virtual channel.
-          if (clipboardPasteInFlight) return;
+          if (proactivePasteInFlight) return;
+          proactivePasteInFlight = true;
 
           const data = new ClipboardData();
           data.addText('text/plain', text);
-          clipboardPasteInFlight = true;
 
-          // Race the WASM promise against a timeout so a frozen CLIPRDR
-          // handshake never permanently blocks future paste attempts.
           const pastePromise = sessionRef.current.onClipboardPaste(data) as Promise<void>;
           const timeoutPromise = new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error('clipboard timeout')), PASTE_TIMEOUT_MS),
           );
 
           Promise.race([pastePromise, timeoutPromise])
-            .then(() => {
-              // Only record as successfully pushed after the channel acks it.
-              lastPushedToGuest = text;
-            })
+            .then(() => { lastPushedToGuest = text; })
             .catch(() => {
-              // On timeout or channel error: clear the in-flight flag and reset
-              // the dedup guard so the same text can be retried immediately.
+              // On timeout or error: reset so same text can be retried next click.
               lastPushedToGuest = '';
             })
-            .finally(() => {
-              clipboardPasteInFlight = false;
-            });
+            .finally(() => { proactivePasteInFlight = false; });
         };
 
         const syncHostClipboardToGuest = () => {
@@ -469,16 +476,18 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
             }
           })
           .forceClipboardUpdateCallback(() => {
-            // Push last known text immediately so Ctrl+V works even if the
-            // Clipboard API is unavailable (document not focused).
-            if (localClipboardText) pushClipboardToGuest(localClipboardText);
-            // Then try to get fresh clipboard content and push again if different.
+            // IronRDP fires this when the server sends CB_FORMAT_DATA_REQUEST (Ctrl+V in remote app).
+            // We MUST respond — use pasteToGuest which is never blocked by the in-flight guard.
+            // Prefer fresh browser clipboard; fall back to last known text if API is unavailable.
             navigator.clipboard.readText().then((text) => {
-              if (text && text !== lastPushedToGuest) {
-                localClipboardText = text;
-                pushClipboardToGuest(text);
+              const content = text || localClipboardText;
+              if (content) {
+                if (text) localClipboardText = text;
+                pasteToGuest(content);
               }
-            }).catch(() => {});
+            }).catch(() => {
+              if (localClipboardText) pasteToGuest(localClipboardText);
+            });
           })
           .extension(displayControl!(true))
           .connect();
@@ -755,7 +764,9 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
           const text = e.clipboardData?.getData('text/plain') ?? '';
           if (text) {
             localClipboardText = text;
-            pushClipboardToGuest(text);
+            // Reactive path — user explicitly pressed Ctrl+V in browser.
+            // Use pasteToGuest (unguarded) so it's never blocked by a proactive sync.
+            pasteToGuest(text);
           }
         };
 
