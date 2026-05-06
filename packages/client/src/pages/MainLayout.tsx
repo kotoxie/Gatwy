@@ -591,7 +591,7 @@ export function MainLayout() {
             <code className="bg-red-800 px-1 rounded text-xs">GATWY_ENCRYPTION_KEY</code> is not set — the encryption key is stored alongside your data.
             Set this environment variable before going to production.{' '}
             <a
-              href="https://github.com/kotoxie/gatwy#encryption-key"
+              href="https://docs.gatwy.dev/configuration#encryption-key"
               target="_blank"
               rel="noreferrer"
               className="underline opacity-80 hover:opacity-100"
