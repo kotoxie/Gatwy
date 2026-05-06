@@ -64,16 +64,24 @@ const EVENT_GROUPS: { label: string; events: { value: string; label: string }[] 
       { value: 'auth.login_success', label: 'Login succeeded' },
       { value: 'auth.login_failed', label: 'Login failed' },
       { value: 'auth.logout', label: 'Logout' },
-      { value: 'auth.mfa_enabled', label: 'MFA enabled' },
-      { value: 'auth.mfa_disabled', label: 'MFA disabled' },
+      { value: 'auth.password_changed', label: 'Password changed' },
     ],
   },
   {
     label: 'Sessions',
     events: [
       { value: 'session.*', label: 'Sessions — all' },
-      { value: 'session.started', label: 'Session started' },
-      { value: 'session.ended', label: 'Session ended' },
+      { value: 'session.rdp.connect', label: 'RDP session connected' },
+      { value: 'session.rdp.disconnect', label: 'RDP session disconnected' },
+      { value: 'session.ssh.connect', label: 'SSH session connected' },
+      { value: 'session.ssh.disconnect', label: 'SSH session disconnected' },
+      { value: 'session.telnet.connect', label: 'Telnet session connected' },
+      { value: 'session.telnet.disconnect', label: 'Telnet session disconnected' },
+      { value: 'session.vnc.connect', label: 'VNC session connected' },
+      { value: 'session.vnc.disconnect', label: 'VNC session disconnected' },
+      { value: 'session.smb.connect', label: 'SMB session connected' },
+      { value: 'session.sftp.connect', label: 'SFTP session connected' },
+      { value: 'session.ftp.connect', label: 'FTP session connected' },
     ],
   },
   {
@@ -83,15 +91,31 @@ const EVENT_GROUPS: { label: string; events: { value: string; label: string }[] 
       { value: 'connection.created', label: 'Connection created' },
       { value: 'connection.updated', label: 'Connection updated' },
       { value: 'connection.deleted', label: 'Connection deleted' },
+      { value: 'connections.imported', label: 'Connections imported' },
     ],
   },
   {
     label: 'Users',
     events: [
       { value: 'user.*', label: 'Users — all' },
+      { value: 'user.setup', label: 'Initial admin setup completed' },
       { value: 'user.created', label: 'User created' },
       { value: 'user.updated', label: 'User updated' },
       { value: 'user.deleted', label: 'User deleted' },
+      { value: 'user.password_reset', label: 'User password reset' },
+      { value: 'user.unlocked', label: 'User unlocked' },
+      { value: 'user.mfa_enabled', label: 'MFA enabled' },
+      { value: 'user.mfa_disabled', label: 'MFA disabled' },
+    ],
+  },
+  {
+    label: 'Roles',
+    events: [
+      { value: 'role.*', label: 'Roles — all' },
+      { value: 'role.created', label: 'Role created' },
+      { value: 'role.updated', label: 'Role updated' },
+      { value: 'role.reset', label: 'Role permissions reset' },
+      { value: 'role.deleted', label: 'Role deleted' },
     ],
   },
   {
@@ -109,12 +133,65 @@ const EVENT_GROUPS: { label: string; events: { value: string; label: string }[] 
     ],
   },
   {
+    label: 'Backup',
+    events: [
+      { value: 'backup.*', label: 'Backup — all' },
+      { value: 'backup.auto.*', label: 'Auto backup — all' },
+      { value: 'backup.auto.config_updated', label: 'Auto backup config updated' },
+      { value: 'backup.auto.destination_tested', label: 'Auto backup destination tested' },
+      { value: 'backup.auto.run_succeeded', label: 'Auto backup run succeeded' },
+      { value: 'backup.auto.run_failed', label: 'Auto backup run failed' },
+      { value: 'backup.auto.auto_disabled', label: 'Auto backup auto-disabled' },
+      { value: 'admin.backup.export', label: 'Manual backup export' },
+    ],
+  },
+  {
     label: 'Security',
     events: [
       { value: 'security.*', label: 'Security — all' },
       { value: 'security.ip_blocked', label: 'IP address blocked' },
       { value: 'security.account_locked', label: 'Account locked (too many failed logins)' },
       { value: 'security.locked_account_attempt', label: 'Login attempt on locked account' },
+    ],
+  },
+  {
+    label: 'Notifications',
+    events: [
+      { value: 'notifications.*', label: 'Notifications — all' },
+      { value: 'notifications.log_entry_deleted', label: 'Notification log entry deleted' },
+      { value: 'notifications.log_cleared', label: 'Notification log cleared' },
+      { value: 'notifications.log_purged', label: 'Notification log purged (retention)' },
+      { value: 'test.notification', label: 'Notification test sent' },
+      { value: 'retry', label: 'Notification retry dispatched' },
+    ],
+  },
+  {
+    label: 'Profile',
+    events: [
+      { value: 'profile.*', label: 'Profile — all' },
+      { value: 'profile.updated', label: 'Profile updated' },
+    ],
+  },
+  {
+    label: 'Database',
+    events: [
+      { value: 'db.*', label: 'Database sessions — all' },
+      { value: 'db.connect', label: 'Database session connected' },
+      { value: 'db.disconnect', label: 'Database session disconnected' },
+    ],
+  },
+  {
+    label: 'Admin',
+    events: [
+      { value: 'admin.*', label: 'Admin actions — all' },
+      { value: 'admin.sessions.purge', label: 'Admin sessions purged' },
+    ],
+  },
+  {
+    label: 'Recordings',
+    events: [
+      { value: 'recordings.*', label: 'Recordings — all' },
+      { value: 'recordings.retention_purged', label: 'Recordings retention purged' },
     ],
   },
   {
@@ -167,7 +244,9 @@ function getEventLabel(value: string): string {
 // Category icon mapping for visual hierarchy
 const GROUP_ICONS: Record<string, string> = {
   All: '🌐', Auth: '🔑', Sessions: '💻', Connections: '🔌',
-  Users: '👤', Settings: '⚙️', Security: '🛡️', System: '⚡',
+  Users: '👤', Roles: '🪪', Settings: '⚙️', Backup: '💾', Security: '🛡️',
+  Notifications: '🔔', Profile: '🧾', Database: '🗄️', Admin: '🛠️',
+  Recordings: '🎥', System: '⚡',
 };
 
 function EventPicker({ events, onChange }: { events: string[]; onChange: (v: string[]) => void }) {
