@@ -252,6 +252,8 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         // Tracks the last text we pushed TO the guest so the dedup guard only
         // blocks actual duplicates in the host→guest direction, not round-trips.
         let lastPushedToGuest = '';
+        // Tracks in-flight paste promise to prevent concurrent CLIPRDR handshakes.
+        let clipboardPasteInFlight = false;
 
         // ── Software cursor state (for recording compositing) ────────────────
         // The CSS cursor is a hardware overlay and never appears in captureStream.
@@ -318,12 +320,38 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         };
         canvas.addEventListener('mousemove', onRecMouseMove);
 
+        const PASTE_TIMEOUT_MS = 3000;
+
         const pushClipboardToGuest = (text: string) => {
           if (!sessionRef.current) return;
+          // If a CLIPRDR handshake is already in flight, skip — concurrent
+          // CB_FORMAT_LIST PDUs can deadlock the clipboard virtual channel.
+          if (clipboardPasteInFlight) return;
+
           const data = new ClipboardData();
           data.addText('text/plain', text);
-          lastPushedToGuest = text;
-          sessionRef.current.onClipboardPaste(data).catch(() => {});
+          clipboardPasteInFlight = true;
+
+          // Race the WASM promise against a timeout so a frozen CLIPRDR
+          // handshake never permanently blocks future paste attempts.
+          const pastePromise = sessionRef.current.onClipboardPaste(data) as Promise<void>;
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('clipboard timeout')), PASTE_TIMEOUT_MS),
+          );
+
+          Promise.race([pastePromise, timeoutPromise])
+            .then(() => {
+              // Only record as successfully pushed after the channel acks it.
+              lastPushedToGuest = text;
+            })
+            .catch(() => {
+              // On timeout or channel error: clear the in-flight flag and reset
+              // the dedup guard so the same text can be retried immediately.
+              lastPushedToGuest = '';
+            })
+            .finally(() => {
+              clipboardPasteInFlight = false;
+            });
         };
 
         const syncHostClipboardToGuest = () => {
