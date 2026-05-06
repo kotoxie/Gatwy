@@ -398,9 +398,6 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
                 <div className="flex items-center gap-1.5 px-3 py-1.5">
                   <span className="text-text-secondary">{cat.headerIcon}</span>
                   <span className="text-[10px] font-semibold text-text-secondary uppercase tracking-wider">{cat.label}</span>
-                  {cat.id === 'db' && (
-                    <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-amber-400/15 text-amber-400 leading-none">beta</span>
-                  )}
                 </div>
                 {cat.protocols.map(({ id: p, label, icon }) => (
                   <button

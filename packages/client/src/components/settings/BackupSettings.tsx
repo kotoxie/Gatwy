@@ -506,7 +506,6 @@ function AutoBackupTab() {
               <h2 className="text-base font-semibold text-text-primary">Configuration</h2>
               <p className="text-xs text-text-secondary mt-0.5">Single scheduled job. SMB destination only.</p>
             </div>
-            <span className="px-2 py-1 rounded-full border border-border bg-surface-hover text-[11px] text-text-secondary">Phase 1</span>
           </div>
           {loading ? (
             <p className="text-sm text-text-secondary">Loading auto-backup configuration...</p>
