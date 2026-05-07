@@ -415,7 +415,12 @@ async function ensureSmbDirs(smb: SMB2, remoteDir: string): Promise<void> {
 }
 
 function buildAutoFilename(): string {
-  return `${FILE_PREFIX}${new Date().toISOString().replace(/[:]/g, '-').replace(/\..+$/, 'Z')}${FILE_SUFFIX}`;
+  const tz = getSetting('app.timezone') || 'UTC';
+  const now = new Date();
+  const parts = getZonedNowParts(tz, now);
+  const pad = (n: number, len = 2) => String(n).padStart(len, '0');
+  const ts = `${parts.year}-${pad(parts.month)}-${pad(parts.day)}T${pad(parts.hour)}-${pad(parts.minute)}-00`;
+  return `${FILE_PREFIX}${ts}${FILE_SUFFIX}`;
 }
 
 function isManagedBackupName(name: string): boolean {
