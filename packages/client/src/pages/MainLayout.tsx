@@ -132,7 +132,8 @@ export function MainLayout() {
     const saved = localStorage.getItem('gatwy-sidebar-mode') as SidebarMode | null;
     return saved ?? 'open';
   });
-  const [sidebarHovered, setSidebarHovered] = useState(false);
+  const [sidebarButtonHovered, setSidebarButtonHovered] = useState(false);
+  const [sidebarPanelHovered, setSidebarPanelHovered] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
   const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
   const isDragging = useRef(false);
@@ -185,6 +186,8 @@ export function MainLayout() {
       return next;
     });
   }, []);
+
+  const showHiddenSidebar = sidebarMode === 'hide' && (sidebarButtonHovered || sidebarPanelHovered);
 
   const onOpenSettings = useCallback((section?: string) => {
     setSettingsSection(section);
@@ -622,7 +625,13 @@ export function MainLayout() {
   return (
     <div className="flex flex-col h-screen bg-surface select-none">
       <IdleMonitor />
-      <Header sidebarMode={sidebarMode} onCycleSidebarMode={cycleSidebarMode} onOpenSettings={onOpenSettings} />
+      <Header
+        sidebarMode={sidebarMode}
+        onCycleSidebarMode={cycleSidebarMode}
+        onSidebarButtonHoverStart={() => setSidebarButtonHovered(true)}
+        onSidebarButtonHoverEnd={() => setSidebarButtonHovered(false)}
+        onOpenSettings={onOpenSettings}
+      />
       {showAutoBackupWelcome && (
         <div className="flex items-start gap-3 bg-accent/90 text-white px-4 py-2.5 text-sm shadow-md shrink-0">
           <span className="text-lg shrink-0 mt-0.5">✨</span>
@@ -694,16 +703,14 @@ export function MainLayout() {
         {sidebarMode === 'hide' && (
           <div
             className="absolute left-0 top-0 bottom-0 z-30 flex"
-            style={{ width: sidebarHovered ? sidebarWidth + 4 : 4 }}
-            onMouseEnter={() => setSidebarHovered(true)}
-            onMouseLeave={() => setSidebarHovered(false)}
+            style={{ width: showHiddenSidebar ? sidebarWidth : 0 }}
+            onMouseEnter={() => setSidebarPanelHovered(true)}
+            onMouseLeave={() => setSidebarPanelHovered(false)}
           >
-            {/* Hover strip always present */}
-            <div className="w-1 h-full bg-border hover:bg-accent/60 shrink-0 cursor-pointer" />
             {/* Sidebar slides in */}
             <div
               className="overflow-hidden transition-[width] duration-[250ms] ease-in-out shadow-xl"
-              style={{ width: sidebarHovered ? sidebarWidth : 0 }}
+              style={{ width: showHiddenSidebar ? sidebarWidth : 0 }}
             >
               <div style={{ width: sidebarWidth }}>
                 <Sidebar onConnect={openTab} onConnectMultiple={openMultipleTabs} width={sidebarWidth} />
@@ -711,10 +718,10 @@ export function MainLayout() {
             </div>
           </div>
         )}
-        {/* 4px left offset so hover strip doesn't overlap content in hide mode */}
+        {/* No left offset in hide mode because opening is controlled by header button hover */}
         <div
           className="flex flex-col flex-1 overflow-hidden relative transition-[padding-left] duration-[250ms]"
-          style={{ paddingLeft: sidebarMode === 'hide' ? 4 : 0 }}
+          style={{ paddingLeft: 0 }}
         >
           <TabBar
             tabs={tabBarItems}

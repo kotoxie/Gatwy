@@ -30,10 +30,18 @@ export type SidebarMode = 'open' | 'closed' | 'hide';
 interface HeaderProps {
   sidebarMode: SidebarMode;
   onCycleSidebarMode: () => void;
+  onSidebarButtonHoverStart?: () => void;
+  onSidebarButtonHoverEnd?: () => void;
   onOpenSettings: (section?: string) => void;
 }
 
-export function Header({ sidebarMode, onCycleSidebarMode, onOpenSettings }: HeaderProps) {
+export function Header({
+  sidebarMode,
+  onCycleSidebarMode,
+  onSidebarButtonHoverStart,
+  onSidebarButtonHoverEnd,
+  onOpenSettings,
+}: HeaderProps) {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { settings } = useSettings();
@@ -96,6 +104,8 @@ export function Header({ sidebarMode, onCycleSidebarMode, onOpenSettings }: Head
       <div className="flex items-center gap-3">
         <button
           onClick={onCycleSidebarMode}
+          onMouseEnter={onSidebarButtonHoverStart}
+          onMouseLeave={onSidebarButtonHoverEnd}
           className={`p-1.5 rounded hover:bg-surface-hover transition-colors ${
             sidebarMode === 'open'
               ? 'text-accent bg-accent/10'
