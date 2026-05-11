@@ -371,6 +371,26 @@ export function MainLayout() {
     [],
   );
 
+  const handleSidebarConnect = useCallback(
+    (connection: { id: string; name: string; protocol: Protocol }) => {
+      openTab(connection);
+      if (sidebarMode === 'hide') {
+        setHiddenSidebarOpen(false);
+      }
+    },
+    [openTab, sidebarMode],
+  );
+
+  const handleSidebarConnectMultiple = useCallback(
+    (connections: Array<{ id: string; name: string; protocol: Protocol }>) => {
+      openMultipleTabs(connections);
+      if (sidebarMode === 'hide') {
+        setHiddenSidebarOpen(false);
+      }
+    },
+    [openMultipleTabs, sidebarMode],
+  );
+
   // ---------- splitView ----------
   // Adds a new empty pane to the specified view's pane tree alongside activePaneId.
 
@@ -725,7 +745,7 @@ export function MainLayout() {
         {/* Open mode: sidebar always visible, pushes layout */}
         {sidebarMode === 'open' && (
           <>
-            <Sidebar onConnect={openTab} onConnectMultiple={openMultipleTabs} width={sidebarWidth} />
+            <Sidebar onConnect={handleSidebarConnect} onConnectMultiple={handleSidebarConnectMultiple} width={sidebarWidth} />
             <div
               className="w-1 cursor-col-resize bg-border hover:bg-accent/60 active:bg-accent transition-colors shrink-0"
               onMouseDown={onDragStart}
@@ -751,7 +771,7 @@ export function MainLayout() {
               style={{ width: showHiddenSidebar ? sidebarWidth : 0 }}
             >
               <div style={{ width: sidebarWidth }}>
-                <Sidebar onConnect={openTab} onConnectMultiple={openMultipleTabs} width={sidebarWidth} />
+                <Sidebar onConnect={handleSidebarConnect} onConnectMultiple={handleSidebarConnectMultiple} width={sidebarWidth} />
               </div>
             </div>
           </div>
