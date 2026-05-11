@@ -4,14 +4,15 @@
 ### ![alt text](https://github.com/kotoxie/Gatwy/blob/master/packages/client/public/favicon.png?raw=true) 
 
 
-### Lightning-fast, self-hosted remote access — RDP, SSH, VNC, Telnet, SMB, SFTP, FTP, PostgreSQL & MySQL in one Docker container.
+### Self-host your entire remote access stack in one Docker container — 9 protocols, one interface: RDP, SSH, VNC, Telnet, SMB, SFTP, FTP, MySQL & PostgreSQL.
+
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Image Size](https://img.shields.io/endpoint?url=https://gatwy-image-size.gatwy.dev)
 [![Latest Release](https://img.shields.io/github/v/release/kotoxie/gatwy?label=release)](https://github.com/kotoxie/gatwy/releases/latest)
 [![Docker Image](https://img.shields.io/badge/ghcr.io-kotoxie%2Fgatwy-blue?logo=docker)](https://ghcr.io/kotoxie/gatwy)
 
-**No Web-sockets. No middleware. No Java. Just raw WebAssembly RDP at full speed.**
+**No middleware. No Java. No server relay. WebAssembly-native RDP running directly in your browser — zero overhead across all 9 protocols.**
 
 [Website](https://gatwy.dev) · [Documentation](https://docs.gatwy.dev) · [Gatwy vs Guacamole](https://docs.gatwy.dev/comparison)
 
