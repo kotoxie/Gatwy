@@ -241,6 +241,18 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
   const bgMenuRef = useRef<HTMLDivElement>(null);
   const skipHealthCheckRef = useRef(false);
 
+  const VIEWPORT_PADDING = 8;
+
+  function getClampedMenuPosition(x: number, y: number, width: number, height: number): { x: number; y: number } {
+    if (typeof window === 'undefined') return { x, y };
+    const maxX = Math.max(VIEWPORT_PADDING, window.innerWidth - width - VIEWPORT_PADDING);
+    const maxY = Math.max(VIEWPORT_PADDING, window.innerHeight - height - VIEWPORT_PADDING);
+    return {
+      x: Math.min(Math.max(x, VIEWPORT_PADDING), maxX),
+      y: Math.min(Math.max(y, VIEWPORT_PADDING), maxY),
+    };
+  }
+
   // Close connection context menu on outside click / Escape
   useEffect(() => {
     if (!contextMenu && !folderContextMenu && !bgContextMenu) return;
@@ -1022,6 +1034,16 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
     );
   }
 
+  const contextMenuPos = contextMenu ? getClampedMenuPosition(contextMenu.x, contextMenu.y, 190, 280) : null;
+  const bgMenuPos = bgContextMenu ? getClampedMenuPosition(bgContextMenu.x, bgContextMenu.y, 180, 120) : null;
+  const folderMenuPos = folderContextMenu ? getClampedMenuPosition(folderContextMenu.x, folderContextMenu.y, 200, 320) : null;
+
+  const bgSubmenuOpenLeft = !!bgMenuPos && typeof window !== 'undefined' && bgMenuPos.x + 180 + 150 + VIEWPORT_PADDING > window.innerWidth;
+  const bgSubmenuOpenUp = !!bgMenuPos && typeof window !== 'undefined' && bgMenuPos.y + 300 + VIEWPORT_PADDING > window.innerHeight;
+
+  const folderSubmenuOpenLeft = !!folderMenuPos && typeof window !== 'undefined' && folderMenuPos.x + 200 + 150 + VIEWPORT_PADDING > window.innerWidth;
+  const folderSubmenuOpenUp = !!folderMenuPos && typeof window !== 'undefined' && folderMenuPos.y + 300 + VIEWPORT_PADDING > window.innerHeight;
+
   return (
     <>
       <aside
@@ -1397,11 +1419,11 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
       )}
 
       {/* Connection right-click context menu */}
-      {contextMenu && (
+      {contextMenu && contextMenuPos && (
         <div
           ref={menuRef}
           className="fixed z-50 bg-surface-alt border border-border rounded shadow-lg py-1 text-sm min-w-[160px]"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
+          style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
         >
           <button
             className="w-full px-4 py-1.5 text-left hover:bg-surface-hover text-text-primary flex items-center gap-2"
@@ -1466,11 +1488,11 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
       )}
 
       {/* Background right-click context menu */}
-      {bgContextMenu && (
+      {bgContextMenu && bgMenuPos && (
         <div
           ref={bgMenuRef}
           className="fixed z-50 bg-surface-alt border border-border rounded shadow-lg py-1 text-sm min-w-[170px]"
-          style={{ left: bgContextMenu.x, top: bgContextMenu.y }}
+          style={{ left: bgMenuPos.x, top: bgMenuPos.y }}
           onMouseLeave={() => setShowNewConnSubmenu(false)}
         >
           {/* New Connection with flyout */}
@@ -1483,7 +1505,13 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 18l6-6-6-6"/></svg>
             </button>
             {showNewConnSubmenu && (
-              <div className="absolute left-full top-0 ml-0.5 bg-surface-alt border border-border rounded shadow-lg py-1 min-w-[130px] z-50">
+              <div
+                className={clsx(
+                  'absolute bg-surface-alt border border-border rounded shadow-lg py-1 min-w-[130px] z-50',
+                  bgSubmenuOpenLeft ? 'right-full mr-0.5' : 'left-full ml-0.5',
+                  bgSubmenuOpenUp ? 'bottom-0' : 'top-0',
+                )}
+              >
                 <ProtocolSubmenuItems groupId={null} onSelect={(p) => { openNewConnectionInFolder(null, p); setBgContextMenu(null); setShowNewConnSubmenu(false); }} />
               </div>
             )}
@@ -1499,11 +1527,11 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
       )}
 
       {/* Folder right-click context menu */}
-      {folderContextMenu && (
+      {folderContextMenu && folderMenuPos && (
         <div
           ref={folderMenuRef}
           className="fixed z-50 bg-surface-alt border border-border rounded shadow-lg py-1 text-sm min-w-[180px]"
-          style={{ left: folderContextMenu.x, top: folderContextMenu.y }}
+          style={{ left: folderMenuPos.x, top: folderMenuPos.y }}
           onMouseLeave={() => setShowNewConnSubmenu(false)}
         >
           {onConnectMultiple && (
@@ -1532,7 +1560,13 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 18l6-6-6-6"/></svg>
             </button>
             {showNewConnSubmenu && (
-              <div className="absolute left-full top-0 ml-0.5 bg-surface-alt border border-border rounded shadow-lg py-1 min-w-[130px] z-50">
+              <div
+                className={clsx(
+                  'absolute bg-surface-alt border border-border rounded shadow-lg py-1 min-w-[130px] z-50',
+                  folderSubmenuOpenLeft ? 'right-full mr-0.5' : 'left-full ml-0.5',
+                  folderSubmenuOpenUp ? 'bottom-0' : 'top-0',
+                )}
+              >
                 <ProtocolSubmenuItems groupId={folderContextMenu.group.id} onSelect={(p) => { openNewConnectionInFolder(folderContextMenu.group.id, p); setFolderContextMenu(null); setShowNewConnSubmenu(false); }} />
               </div>
             )}
