@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Header } from '../components/Header';
+import { Header, type SidebarMode } from '../components/Header';
 import { Sidebar } from '../components/Sidebar';
 import { TabBar } from '../components/TabBar';
 import { SessionsLayer } from '../components/SessionsLayer';
@@ -126,7 +126,13 @@ export function MainLayout() {
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
   const sessionsContainerRef = useRef<HTMLDivElement>(null);
 
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+  const [sidebarMode, setSidebarMode] = useState<SidebarMode>(() => {
+    if (isMobile) return 'hide';
+    const saved = localStorage.getItem('gatwy-sidebar-mode') as SidebarMode | null;
+    return saved ?? 'open';
+  });
+  const [sidebarHovered, setSidebarHovered] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
   const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
   const isDragging = useRef(false);
@@ -172,10 +178,30 @@ export function MainLayout() {
 
   const hasRestoredRef = useRef(false);
 
+  const cycleSidebarMode = useCallback(() => {
+    setSidebarMode((prev) => {
+      const next: SidebarMode = prev === 'open' ? 'hide' : prev === 'hide' ? 'closed' : 'open';
+      localStorage.setItem('gatwy-sidebar-mode', next);
+      return next;
+    });
+  }, []);
+
   const onOpenSettings = useCallback((section?: string) => {
     setSettingsSection(section);
     setSettingsOpen(true);
   }, []);
+
+  // Ctrl+` keyboard shortcut to cycle sidebar mode
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === '`') {
+        e.preventDefault();
+        cycleSidebarMode();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [cycleSidebarMode]);
 
   // Refs for synchronous reads inside event-triggered callbacks
   const viewsRef = useRef<ViewData[]>(views);
@@ -596,7 +622,7 @@ export function MainLayout() {
   return (
     <div className="flex flex-col h-screen bg-surface select-none">
       <IdleMonitor />
-      <Header onToggleSidebar={() => setSidebarOpen((o) => !o)} onOpenSettings={onOpenSettings} />
+      <Header sidebarMode={sidebarMode} onCycleSidebarMode={cycleSidebarMode} onOpenSettings={onOpenSettings} />
       {showAutoBackupWelcome && (
         <div className="flex items-start gap-3 bg-accent/90 text-white px-4 py-2.5 text-sm shadow-md shrink-0">
           <span className="text-lg shrink-0 mt-0.5">✨</span>
@@ -653,8 +679,9 @@ export function MainLayout() {
           </div>
         </div>
       )}
-      <div className="flex flex-1 overflow-hidden">
-        {sidebarOpen && (
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Open mode: sidebar always visible, pushes layout */}
+        {sidebarMode === 'open' && (
           <>
             <Sidebar onConnect={openTab} onConnectMultiple={openMultipleTabs} width={sidebarWidth} />
             <div
@@ -663,7 +690,32 @@ export function MainLayout() {
             />
           </>
         )}
-        <div className="flex flex-col flex-1 overflow-hidden relative">
+        {/* Hide mode: sidebar overlays content on hover */}
+        {sidebarMode === 'hide' && (
+          <div
+            className="absolute left-0 top-0 bottom-0 z-30 flex"
+            style={{ width: sidebarHovered ? sidebarWidth + 4 : 4 }}
+            onMouseEnter={() => setSidebarHovered(true)}
+            onMouseLeave={() => setSidebarHovered(false)}
+          >
+            {/* Hover strip always present */}
+            <div className="w-1 h-full bg-border hover:bg-accent/60 shrink-0 cursor-pointer" />
+            {/* Sidebar slides in */}
+            <div
+              className="overflow-hidden transition-[width] duration-[250ms] ease-in-out shadow-xl"
+              style={{ width: sidebarHovered ? sidebarWidth : 0 }}
+            >
+              <div style={{ width: sidebarWidth }}>
+                <Sidebar onConnect={openTab} onConnectMultiple={openMultipleTabs} width={sidebarWidth} />
+              </div>
+            </div>
+          </div>
+        )}
+        {/* 4px left offset so hover strip doesn't overlap content in hide mode */}
+        <div
+          className="flex flex-col flex-1 overflow-hidden relative transition-[padding-left] duration-[250ms]"
+          style={{ paddingLeft: sidebarMode === 'hide' ? 4 : 0 }}
+        >
           <TabBar
             tabs={tabBarItems}
             activeTabId={activeViewId}

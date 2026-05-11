@@ -25,12 +25,15 @@ function autoInitials(displayName: string): string {
   return displayName.slice(0, 2).toUpperCase();
 }
 
+export type SidebarMode = 'open' | 'closed' | 'hide';
+
 interface HeaderProps {
-  onToggleSidebar: () => void;
+  sidebarMode: SidebarMode;
+  onCycleSidebarMode: () => void;
   onOpenSettings: (section?: string) => void;
 }
 
-export function Header({ onToggleSidebar, onOpenSettings }: HeaderProps) {
+export function Header({ sidebarMode, onCycleSidebarMode, onOpenSettings }: HeaderProps) {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { settings } = useSettings();
@@ -92,13 +95,34 @@ export function Header({ onToggleSidebar, onOpenSettings }: HeaderProps) {
     <header className="flex items-center justify-between h-12 px-4 bg-surface-alt border-b border-border shrink-0">
       <div className="flex items-center gap-3">
         <button
-          onClick={onToggleSidebar}
-          className="p-1.5 rounded hover:bg-surface-hover text-text-secondary"
-          title="Toggle sidebar"
+          onClick={onCycleSidebarMode}
+          className={`p-1.5 rounded hover:bg-surface-hover transition-colors ${
+            sidebarMode === 'open'
+              ? 'text-accent bg-accent/10'
+              : sidebarMode === 'hide'
+              ? 'text-accent/70 bg-accent/5'
+              : 'text-text-secondary'
+          }`}
+          title={`Sidebar: ${sidebarMode} — click to cycle (Ctrl+\`)`}
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M3 12h18M3 6h18M3 18h18" />
-          </svg>
+          {sidebarMode === 'open' && (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <path d="M9 3v18" />
+            </svg>
+          )}
+          {sidebarMode === 'hide' && (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <path d="M9 3v18" strokeDasharray="3 2" />
+            </svg>
+          )}
+          {sidebarMode === 'closed' && (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <path d="M9 3v18" strokeOpacity="0.25" />
+            </svg>
+          )}
         </button>
         {appLogo ? (
           <img src={appLogo} alt={appName} className="h-7 w-auto max-w-[140px] object-contain" />
