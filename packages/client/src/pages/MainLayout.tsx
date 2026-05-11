@@ -132,8 +132,8 @@ export function MainLayout() {
     const saved = localStorage.getItem('gatwy-sidebar-mode') as SidebarMode | null;
     return saved ?? 'open';
   });
-  const [sidebarButtonHovered, setSidebarButtonHovered] = useState(false);
-  const [sidebarPanelHovered, setSidebarPanelHovered] = useState(false);
+  const [hiddenSidebarOpen, setHiddenSidebarOpen] = useState(false);
+  const hideSidebarCloseTimerRef = useRef<number | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
   const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
   const isDragging = useRef(false);
@@ -187,7 +187,35 @@ export function MainLayout() {
     });
   }, []);
 
-  const showHiddenSidebar = sidebarMode === 'hide' && (sidebarButtonHovered || sidebarPanelHovered);
+  const clearHideSidebarCloseTimer = useCallback(() => {
+    if (hideSidebarCloseTimerRef.current !== null) {
+      window.clearTimeout(hideSidebarCloseTimerRef.current);
+      hideSidebarCloseTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleHideSidebarClose = useCallback(() => {
+    clearHideSidebarCloseTimer();
+    hideSidebarCloseTimerRef.current = window.setTimeout(() => {
+      setHiddenSidebarOpen(false);
+      hideSidebarCloseTimerRef.current = null;
+    }, 250);
+  }, [clearHideSidebarCloseTimer]);
+
+  const showHiddenSidebar = sidebarMode === 'hide' && hiddenSidebarOpen;
+
+  useEffect(() => {
+    return () => {
+      clearHideSidebarCloseTimer();
+    };
+  }, [clearHideSidebarCloseTimer]);
+
+  useEffect(() => {
+    if (sidebarMode !== 'hide') {
+      setHiddenSidebarOpen(false);
+      clearHideSidebarCloseTimer();
+    }
+  }, [sidebarMode, clearHideSidebarCloseTimer]);
 
   const onOpenSettings = useCallback((section?: string) => {
     setSettingsSection(section);
@@ -628,8 +656,13 @@ export function MainLayout() {
       <Header
         sidebarMode={sidebarMode}
         onCycleSidebarMode={cycleSidebarMode}
-        onSidebarButtonHoverStart={() => setSidebarButtonHovered(true)}
-        onSidebarButtonHoverEnd={() => setSidebarButtonHovered(false)}
+        onSidebarButtonHoverStart={() => {
+          clearHideSidebarCloseTimer();
+          setHiddenSidebarOpen(true);
+        }}
+        onSidebarButtonHoverEnd={() => {
+          scheduleHideSidebarClose();
+        }}
         onOpenSettings={onOpenSettings}
       />
       {showAutoBackupWelcome && (
@@ -704,8 +737,13 @@ export function MainLayout() {
           <div
             className="absolute left-0 top-0 bottom-0 z-30 flex"
             style={{ width: showHiddenSidebar ? sidebarWidth : 0 }}
-            onMouseEnter={() => setSidebarPanelHovered(true)}
-            onMouseLeave={() => setSidebarPanelHovered(false)}
+            onMouseEnter={() => {
+              clearHideSidebarCloseTimer();
+              setHiddenSidebarOpen(true);
+            }}
+            onMouseLeave={() => {
+              scheduleHideSidebarClose();
+            }}
           >
             {/* Sidebar slides in */}
             <div
