@@ -13,7 +13,6 @@ function formatBytes(bytes: number): string {
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'general', label: 'General' },
-  { id: 'recordings', label: 'Recordings' },
 ];
 
 // All IANA timezones supported by the runtime (Intl API).

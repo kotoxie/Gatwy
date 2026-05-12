@@ -3,6 +3,7 @@ import { useTimezone } from '../../hooks/useTimezone';
 import { formatDate as formatDateTz } from '../../utils/formatDate';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { RecordingSettings } from './RecordingSettings';
 
 interface SessionRow {
   id: string;
@@ -1002,7 +1003,7 @@ function FilterBar({
 
 export function SessionsHistory() {
   const timezone = useTimezone();
-  const [activeTab, setActiveTab] = useState<'recordings' | 'file-activity'>('recordings');
+  const [activeTab, setActiveTab] = useState<'recordings' | 'file-activity' | 'settings'>('recordings');
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [playingId, setPlayingId] = useState<string | null>(null);
@@ -1100,6 +1101,12 @@ export function SessionsHistory() {
         >
           File Activity
         </button>
+        <button
+          onClick={() => setActiveTab('settings')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'settings' ? 'border-accent text-accent' : 'border-transparent text-text-secondary hover:text-text-primary'}`}
+        >
+          Settings
+        </button>
       </div>
 
       {activeTab === 'recordings' && (loading ? (
@@ -1134,7 +1141,7 @@ export function SessionsHistory() {
             <p className="text-text-secondary text-sm py-4 text-center">No recordings match the current filters.</p>
           )}
           {sessions.length === 0 && (
-            <p className="text-text-secondary text-sm">No recordings yet. Enable session recording in Settings › General › Recordings.</p>
+            <p className="text-text-secondary text-sm">No recordings yet. Enable session recording in Settings › Recordings › Settings.</p>
           )}
 
           {filtered.length > 0 && (
@@ -1204,6 +1211,7 @@ export function SessionsHistory() {
       ))}
 
       {activeTab === 'file-activity' && <FileActivity />}
+      {activeTab === 'settings' && <RecordingSettings />}
     </div>
   );
 }
