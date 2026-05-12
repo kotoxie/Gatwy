@@ -1003,7 +1003,7 @@ function FilterBar({
 
 export function SessionsHistory() {
   const timezone = useTimezone();
-  const [activeTab, setActiveTab] = useState<'recordings' | 'file-activity' | 'settings'>('recordings');
+  const [activeTab, setActiveTab] = useState<'recordings' | 'file-activity' | 'settings'>('settings');
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [playingId, setPlayingId] = useState<string | null>(null);
@@ -1090,6 +1090,12 @@ export function SessionsHistory() {
       {/* Tab bar */}
       <div className="flex border-b border-border">
         <button
+          onClick={() => setActiveTab('settings')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'settings' ? 'border-accent text-accent' : 'border-transparent text-text-secondary hover:text-text-primary'}`}
+        >
+          Settings
+        </button>
+        <button
           onClick={() => setActiveTab('recordings')}
           className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'recordings' ? 'border-accent text-accent' : 'border-transparent text-text-secondary hover:text-text-primary'}`}
         >
@@ -1100,12 +1106,6 @@ export function SessionsHistory() {
           className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'file-activity' ? 'border-accent text-accent' : 'border-transparent text-text-secondary hover:text-text-primary'}`}
         >
           File Activity
-        </button>
-        <button
-          onClick={() => setActiveTab('settings')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'settings' ? 'border-accent text-accent' : 'border-transparent text-text-secondary hover:text-text-primary'}`}
-        >
-          Settings
         </button>
       </div>
 
