@@ -50,6 +50,7 @@ export function SecuritySettings() {
   const [ipMsg, setIpMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [savingIp, setSavingIp] = useState(false);
   const [currentIp, setCurrentIp] = useState<string>('');
+  const [ipBlockWarning, setIpBlockWarning] = useState<string | null>(null);
 
   // Connection limits
   const [maxConnPerUser, setMaxConnPerUser] = useState('10');
@@ -162,45 +163,50 @@ export function SecuritySettings() {
     setIpRules((prev) => prev.filter((r) => r.id !== id));
   }
 
+  function wouldCurrentIpBeBlocked(): boolean {
+    if (!ipRulesEnabled || !currentIp) return false;
+
+    const blockedByAllowlist = ipRulesMode === 'allowlist' && !ipRules
+      .filter((r) => r.type === 'allow')
+      .some((r) => matchesCidr(currentIp, r.cidr));
+    const blockedByDenylist = ipRulesMode === 'denylist' && ipRules
+      .filter((r) => r.type === 'deny')
+      .some((r) => matchesCidr(currentIp, r.cidr));
+
+    return blockedByAllowlist || blockedByDenylist;
+  }
+
+  async function persistIpRules() {
+    const res = await fetch('/api/v1/settings/ip-rules', {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: ipRulesEnabled, mode: ipRulesMode, rules: ipRules }),
+    });
+
+    if (res.ok) {
+      await refresh();
+      invalidateSettings();
+      setIpMsg({ type: 'success', text: 'IP rules saved.' });
+      return;
+    }
+
+    const d = await res.json();
+    setIpMsg({ type: 'error', text: d.error || 'Failed to save.' });
+  }
+
   async function handleIpSave(e: FormEvent) {
     e.preventDefault();
     setSavingIp(true);
     setIpMsg(null);
+    setIpBlockWarning(null);
     try {
-      if (ipRulesEnabled && currentIp) {
-        const blockedByAllowlist = ipRulesMode === 'allowlist' && !ipRules
-          .filter((r) => r.type === 'allow')
-          .some((r) => matchesCidr(currentIp, r.cidr));
-        const blockedByDenylist = ipRulesMode === 'denylist' && ipRules
-          .filter((r) => r.type === 'deny')
-          .some((r) => matchesCidr(currentIp, r.cidr));
-
-        if (blockedByAllowlist || blockedByDenylist) {
-          const ok = window.confirm(
-            `Warning: your current IP (${currentIp}) matches rules that will block your access. Save anyway?`,
-          );
-          if (!ok) {
-            setSavingIp(false);
-            return;
-          }
-        }
+      if (wouldCurrentIpBeBlocked()) {
+        setIpBlockWarning(`Your current IP (${currentIp}) will be blocked by these rules.`);
+        return;
       }
 
-      const res = await fetch('/api/v1/settings/ip-rules', {
-        method: 'PUT',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: ipRulesEnabled, mode: ipRulesMode, rules: ipRules }),
-      });
-
-      if (res.ok) {
-        await refresh();
-        invalidateSettings();
-        setIpMsg({ type: 'success', text: 'IP rules saved.' });
-      } else {
-        const d = await res.json();
-        setIpMsg({ type: 'error', text: d.error || 'Failed to save.' });
-      }
+      await persistIpRules();
     } catch {
       setIpMsg({ type: 'error', text: 'Network error.' });
     } finally {
@@ -447,6 +453,41 @@ export function SecuritySettings() {
             <p className={`text-sm ${ipMsg.type === 'success' ? 'text-green-500' : 'text-red-500'}`}>
               {ipMsg.text}
             </p>
+          )}
+          {ipBlockWarning && (
+            <div className="rounded border border-yellow-500/40 bg-yellow-500/10 p-3 text-sm text-yellow-300 space-y-2">
+              <p>{ipBlockWarning}</p>
+              <p>Saving these rules may immediately block your current session and prevent future logins from this IP.</p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setSavingIp(true);
+                    setIpMsg(null);
+                    try {
+                      await persistIpRules();
+                      setIpBlockWarning(null);
+                    } catch {
+                      setIpMsg({ type: 'error', text: 'Network error.' });
+                    } finally {
+                      setSavingIp(false);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded bg-yellow-500 text-black text-xs font-semibold hover:bg-yellow-400 disabled:opacity-60"
+                  disabled={savingIp}
+                >
+                  {savingIp ? 'Saving...' : 'Save anyway'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIpBlockWarning(null)}
+                  className="px-3 py-1.5 rounded border border-yellow-500/50 text-yellow-200 text-xs hover:bg-yellow-500/10"
+                  disabled={savingIp}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
           )}
           <button
             type="submit"
