@@ -8,6 +8,23 @@ interface IpRule {
   description: string;
 }
 
+function ipToNum(ip: string): number {
+  return ip.split('.').reduce((acc, o) => ((acc << 8) + parseInt(o, 10)) >>> 0, 0) >>> 0;
+}
+
+function matchesCidr(ip: string, cidr: string): boolean {
+  if (!cidr.includes('/')) return cidr === ip;
+  try {
+    const [range, bitsStr] = cidr.split('/');
+    const bits = parseInt(bitsStr, 10);
+    if (bits < 0 || bits > 32) return false;
+    const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+    return (ipToNum(ip) & mask) === (ipToNum(range) & mask);
+  } catch {
+    return false;
+  }
+}
+
 export function SecuritySettings() {
   const { settings, refresh } = useSettings();
 
@@ -32,6 +49,7 @@ export function SecuritySettings() {
   const [newRuleDesc, setNewRuleDesc] = useState('');
   const [ipMsg, setIpMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [savingIp, setSavingIp] = useState(false);
+  const [currentIp, setCurrentIp] = useState<string>('');
 
   // Connection limits
   const [maxConnPerUser, setMaxConnPerUser] = useState('10');
@@ -55,13 +73,20 @@ export function SecuritySettings() {
     setTrustedProxies(settings['security.trusted_proxies'] ?? '');
     setProxyDetectionEnabled(settings['security.proxy_detection_enabled'] !== 'false');
 
-    try {
-      const raw = settings['security.ip_rules'];
-      if (raw) setIpRules(JSON.parse(raw) as IpRule[]);
-    } catch {
-      setIpRules([]);
-    }
   }, [settings]);
+
+  useEffect(() => {
+    fetch('/api/v1/settings/ip-rules', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { enabled: boolean; mode: 'allowlist' | 'denylist'; currentIp: string; rules: IpRule[] } | null) => {
+        if (!d) return;
+        setIpRulesEnabled(d.enabled);
+        setIpRulesMode(d.mode);
+        setCurrentIp(d.currentIp);
+        setIpRules(Array.isArray(d.rules) ? d.rules : []);
+      })
+      .catch(() => {});
+  }, []);
 
   async function saveSetting(updates: Record<string, string>, onSuccess: () => void, onError: (msg: string) => void) {
     const res = await fetch('/api/v1/settings', {
@@ -142,15 +167,40 @@ export function SecuritySettings() {
     setSavingIp(true);
     setIpMsg(null);
     try {
-      await saveSetting(
-        {
-          'security.ip_rules_enabled': String(ipRulesEnabled),
-          'security.ip_rules_mode': ipRulesMode,
-          'security.ip_rules': JSON.stringify(ipRules),
-        },
-        () => setIpMsg({ type: 'success', text: 'IP rules saved.' }),
-        (msg) => setIpMsg({ type: 'error', text: msg }),
-      );
+      if (ipRulesEnabled && currentIp) {
+        const blockedByAllowlist = ipRulesMode === 'allowlist' && !ipRules
+          .filter((r) => r.type === 'allow')
+          .some((r) => matchesCidr(currentIp, r.cidr));
+        const blockedByDenylist = ipRulesMode === 'denylist' && ipRules
+          .filter((r) => r.type === 'deny')
+          .some((r) => matchesCidr(currentIp, r.cidr));
+
+        if (blockedByAllowlist || blockedByDenylist) {
+          const ok = window.confirm(
+            `Warning: your current IP (${currentIp}) matches rules that will block your access. Save anyway?`,
+          );
+          if (!ok) {
+            setSavingIp(false);
+            return;
+          }
+        }
+      }
+
+      const res = await fetch('/api/v1/settings/ip-rules', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: ipRulesEnabled, mode: ipRulesMode, rules: ipRules }),
+      });
+
+      if (res.ok) {
+        await refresh();
+        invalidateSettings();
+        setIpMsg({ type: 'success', text: 'IP rules saved.' });
+      } else {
+        const d = await res.json();
+        setIpMsg({ type: 'error', text: d.error || 'Failed to save.' });
+      }
     } catch {
       setIpMsg({ type: 'error', text: 'Network error.' });
     } finally {
@@ -295,6 +345,9 @@ export function SecuritySettings() {
       <section>
         <h2 className="text-base font-semibold text-text-primary mb-1">IP Rules</h2>
         <p className="text-sm text-text-secondary mb-4">Restrict access by IP address or CIDR range.</p>
+        {currentIp && (
+          <p className="text-xs text-text-secondary mb-2">Current client IP: <span className="font-mono text-text-primary">{currentIp}</span></p>
+        )}
         <form onSubmit={handleIpSave} className="space-y-4">
           <div className="flex items-center gap-3">
             <button

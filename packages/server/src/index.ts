@@ -140,8 +140,8 @@ async function main() {
   });
 
   // API routes
-  app.use('/api/v1/auth', authRoutes);
   app.use('/api/v1', ipRulesMiddleware);
+  app.use('/api/v1/auth', authRoutes);
   app.use('/api/v1/connections', connectionRoutes);
   app.use('/api/v1/settings', settingsRoutes);
   app.use('/api/v1/profile/login-sessions', loginSessionsRoutes);

@@ -2,10 +2,11 @@ import type { Request, Response, NextFunction } from 'express';
 import { queryAll } from '../db/helpers.js';
 import { getSetting } from '../services/settings.js';
 import { logAudit } from '../services/audit.js';
+import { resolveClientIp } from '../services/ip.js';
 
 interface IpRuleRow {
   type: string;
-  ip_cidr: string;
+  cidr: string;
 }
 
 function ipToNum(ip: string): number {
@@ -29,16 +30,15 @@ export function ipRulesMiddleware(req: Request, res: Response, next: NextFunctio
   const enabled = getSetting('security.ip_rules_enabled') === 'true';
   if (!enabled) { next(); return; }
 
-  const rawIp = req.ip ?? '';
-  const clientIp = rawIp.startsWith('::ffff:') ? rawIp.slice(7) : rawIp;
+  const clientIp = resolveClientIp(req);
 
   const mode = getSetting('security.ip_rules_mode'); // 'allowlist' | 'denylist'
-  const rules = queryAll<IpRuleRow>('SELECT type, ip_cidr FROM ip_rules ORDER BY rowid');
+  const rules = queryAll<IpRuleRow>('SELECT type, cidr FROM ip_rules ORDER BY rowid');
 
   if (mode === 'allowlist') {
     const allowed = rules
       .filter((r) => r.type === 'allow')
-      .some((r) => matchesCidr(clientIp, r.ip_cidr));
+      .some((r) => matchesCidr(clientIp, r.cidr));
     if (!allowed) {
       logAudit({
         eventType: 'security.ip_blocked',
@@ -52,7 +52,7 @@ export function ipRulesMiddleware(req: Request, res: Response, next: NextFunctio
     // denylist
     const denied = rules
       .filter((r) => r.type === 'deny')
-      .some((r) => matchesCidr(clientIp, r.ip_cidr));
+      .some((r) => matchesCidr(clientIp, r.cidr));
     if (denied) {
       logAudit({
         eventType: 'security.ip_blocked',

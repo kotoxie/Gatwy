@@ -1,10 +1,20 @@
 import { Router, type Request, type Response } from 'express';
+import crypto from 'crypto';
 import { authRequired, userCan } from '../middleware/auth.js';
 import { logAudit } from '../services/audit.js';
 import { getAllSettings, getSetting, setSettings } from '../services/settings.js';
 import { encrypt, usingFileKey } from '../services/encryption.js';
+import { execute, queryAll } from '../db/helpers.js';
+import { resolveClientIp } from '../services/ip.js';
 
 const router = Router();
+
+interface IpRuleRow {
+  id: string;
+  type: 'allow' | 'deny';
+  cidr: string;
+  description: string | null;
+}
 
 // GET /public — unauthenticated, returns safe public settings needed before login
 router.get('/public', (_req: Request, res: Response) => {
@@ -34,6 +44,69 @@ router.get('/public', (_req: Request, res: Response) => {
 
 // All routes below require authentication
 router.use(authRequired);
+
+router.get('/ip-rules', (req: Request, res: Response) => {
+  if (!userCan(req, 'settings.security')) {
+    res.status(403).json({ error: 'Insufficient permissions' });
+    return;
+  }
+
+  const mode = getSetting('security.ip_rules_mode') as 'allowlist' | 'denylist';
+  const enabled = getSetting('security.ip_rules_enabled') === 'true';
+  const rules = queryAll<IpRuleRow>('SELECT id, type, cidr, description FROM ip_rules ORDER BY rowid');
+  res.json({ enabled, mode, currentIp: resolveClientIp(req), rules });
+});
+
+router.put('/ip-rules', (req: Request, res: Response) => {
+  if (!userCan(req, 'settings.security')) {
+    res.status(403).json({ error: 'Insufficient permissions' });
+    return;
+  }
+
+  const body = req.body as {
+    enabled?: boolean;
+    mode?: 'allowlist' | 'denylist';
+    rules?: Array<{ id?: string; type?: 'allow' | 'deny'; cidr?: string; description?: string }>;
+  };
+
+  if (!body || typeof body !== 'object') {
+    res.status(400).json({ error: 'Invalid payload' });
+    return;
+  }
+
+  const enabled = !!body.enabled;
+  const mode = body.mode === 'denylist' ? 'denylist' : 'allowlist';
+  const rules = Array.isArray(body.rules) ? body.rules : [];
+
+  for (const rule of rules) {
+    if (!rule || (rule.type !== 'allow' && rule.type !== 'deny') || !rule.cidr?.trim()) {
+      res.status(400).json({ error: 'Invalid IP rule' });
+      return;
+    }
+  }
+
+  execute('DELETE FROM ip_rules');
+  for (const rule of rules) {
+    execute(
+      'INSERT INTO ip_rules (id, type, cidr, description, created_by) VALUES (?, ?, ?, ?, ?)',
+      [rule.id ?? crypto.randomUUID(), rule.type, rule.cidr.trim(), (rule.description ?? '').trim() || null, req.user!.userId],
+    );
+  }
+
+  setSettings({
+    'security.ip_rules_enabled': String(enabled),
+    'security.ip_rules_mode': mode,
+  });
+
+  logAudit({
+    userId: req.user!.userId,
+    eventType: 'security.ip_rules_updated',
+    details: { enabled, mode, ruleCount: rules.length },
+    ipAddress: req.ip,
+  });
+
+  res.json({ success: true });
+});
 
 // GET / — return all settings (settings.manage permission)
 router.get('/', (req: Request, res: Response) => {
