@@ -77,19 +77,27 @@ router.put('/ip-rules', (req: Request, res: Response) => {
   const enabled = !!body.enabled;
   const mode = body.mode === 'denylist' ? 'denylist' : 'allowlist';
   const rules = Array.isArray(body.rules) ? body.rules : [];
+  const normalizedRules: Array<{ id?: string; type: 'allow' | 'deny'; cidr: string; description: string }> = [];
 
   for (const rule of rules) {
     if (!rule || (rule.type !== 'allow' && rule.type !== 'deny') || !rule.cidr?.trim()) {
       res.status(400).json({ error: 'Invalid IP rule' });
       return;
     }
+
+    normalizedRules.push({
+      id: rule.id,
+      type: rule.type,
+      cidr: rule.cidr.trim(),
+      description: (rule.description ?? '').trim(),
+    });
   }
 
   execute('DELETE FROM ip_rules');
-  for (const rule of rules) {
+  for (const rule of normalizedRules) {
     execute(
       'INSERT INTO ip_rules (id, type, cidr, description, created_by) VALUES (?, ?, ?, ?, ?)',
-      [rule.id ?? crypto.randomUUID(), rule.type, rule.cidr.trim(), (rule.description ?? '').trim() || null, req.user!.userId],
+      [rule.id ?? crypto.randomUUID(), rule.type, rule.cidr, rule.description || null, req.user!.userId],
     );
   }
 
@@ -101,7 +109,7 @@ router.put('/ip-rules', (req: Request, res: Response) => {
   logAudit({
     userId: req.user!.userId,
     eventType: 'security.ip_rules_updated',
-    details: { enabled, mode, ruleCount: rules.length },
+    details: { enabled, mode, ruleCount: normalizedRules.length },
     ipAddress: req.ip,
   });
 
