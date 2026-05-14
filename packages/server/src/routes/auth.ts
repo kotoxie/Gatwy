@@ -6,6 +6,7 @@ import { queryOne, execute } from '../db/helpers.js';
 import { signToken, verifyToken, signMfaToken, verifyMfaToken } from '../services/jwt.js';
 import { logAudit } from '../services/audit.js';
 import { getSetting } from '../services/settings.js';
+import { config } from '../config.js';
 import { createLoginSession, hashToken } from '../services/loginSession.js';
 import { authRequired, adminRequired } from '../middleware/auth.js';
 import { getPermissionsForRole } from '../services/permissions.js';
@@ -197,9 +198,19 @@ router.get('/providers', (_req: Request, res: Response) => {
 });
 
 function setAuthCookie(res: Response, token: string, maxSessionMinutes?: number): void {
+  const parseConfiguredTimeoutMs = (): number => {
+    const timeout = config.sessionTimeout;
+    const match = timeout.match(/^(\d+)(h|m|s|d)?$/);
+    if (!match) return 90 * 24 * 60 * 60 * 1000;
+    const num = parseInt(match[1], 10);
+    const unit = match[2] || 's';
+    const multipliers: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+    return num * (multipliers[unit] || 1000);
+  };
+
   const maxAgeMs = maxSessionMinutes
     ? maxSessionMinutes * 60 * 1000
-    : 24 * 60 * 60 * 1000; // default 24h
+    : parseConfiguredTimeoutMs();
   res.cookie('gatwy_token', token, {
     httpOnly: true,
     secure: true,

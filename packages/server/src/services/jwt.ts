@@ -29,7 +29,7 @@ export interface JwtPayload {
 }
 
 export function signToken(payload: JwtPayload, maxMinutes?: number): string {
-  let expiresInSeconds = 86400; // default 24h
+  let expiresInSeconds = 90 * 24 * 60 * 60; // default 90d
   if (maxMinutes && maxMinutes > 0) {
     expiresInSeconds = maxMinutes * 60;
   } else {

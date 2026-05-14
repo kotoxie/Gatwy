@@ -9,7 +9,7 @@ export const config = {
   tlsCertPath: process.env.TLS_CERT_PATH || '',
   tlsKeyPath: process.env.TLS_KEY_PATH || '',
   jwtSecret: process.env.JWT_SECRET || '',
-  sessionTimeout: process.env.SESSION_TIMEOUT || '24h',
+  sessionTimeout: process.env.SESSION_TIMEOUT || '90d',
 
   get dbPath() {
     return path.join(this.dataDir, 'gatwy.db');
