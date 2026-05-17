@@ -17,7 +17,6 @@ const MAX_BACKUP_BYTES = 4 * 1024 * 1024 * 1024; // 4 GB
 const RUN_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const SCHEDULE_TICK_MS = 30_000;
 const HISTORY_RETENTION_DAYS = 90;
-const FAILURE_DISABLE_THRESHOLD = 3;
 const FILE_PREFIX = 'gatwy-auto-';
 const FILE_SUFFIX = '.geb';
 
@@ -687,16 +686,9 @@ async function executeBackup(triggerType: 'scheduled' | 'manual'): Promise<void>
     );
     if (history?.id) finishHistoryFailed(history.id, message, startedAtMs);
 
-    let autoDisabled = false;
-    if (failCount >= FAILURE_DISABLE_THRESHOLD) {
-      setAutoSetting('auto_disabled', 'true');
-      autoDisabled = true;
-      logAudit({
-        userId: 'system',
-        eventType: 'backup.auto.auto_disabled',
-        details: { consecutiveFailures: failCount, reason: message },
-      });
-    }
+    // Never auto-disable scheduled backups after repeated failures.
+    // Keep this setting reset in case older versions left it enabled.
+    setAutoSetting('auto_disabled', 'false');
 
     logAudit({
       userId: 'system',
@@ -705,7 +697,7 @@ async function executeBackup(triggerType: 'scheduled' | 'manual'): Promise<void>
         error: message,
         triggerType,
         consecutiveFailures: failCount,
-        autoDisabled,
+        autoDisabled: false,
       },
     });
 
@@ -723,7 +715,7 @@ async function executeBackup(triggerType: 'scheduled' | 'manual'): Promise<void>
 
 function scheduleNextRunFromNow(): void {
   const cfg = getConfig();
-  if (!cfg.enabled || cfg.autoDisabled) {
+  if (!cfg.enabled) {
     setAutoSetting('next_run_at', '');
     return;
   }
@@ -733,7 +725,7 @@ function scheduleNextRunFromNow(): void {
 
 function shouldRunScheduled(now: Date): boolean {
   const cfg = getConfig();
-  if (!cfg.enabled || cfg.autoDisabled) return false;
+  if (!cfg.enabled) return false;
   const next = setting('next_run_at');
   if (!next) return false;
   const nextTs = new Date(next).getTime();
@@ -760,6 +752,7 @@ export function startAutoBackupScheduler(): void {
   if (schedulerStarted) return;
   schedulerStarted = true;
 
+  setAutoSetting('auto_disabled', 'false');
   scheduleNextRunFromNow();
   tickTimer = setInterval(() => {
     void schedulerTick();
