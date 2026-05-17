@@ -755,7 +755,7 @@ export function MainLayout() {
         {/* Hide mode: sidebar overlays content on hover */}
         {sidebarMode === 'hide' && (
           <div
-            className="absolute left-0 top-0 bottom-0 z-30 flex"
+            className="absolute left-0 top-0 bottom-0 z-30 flex h-full min-h-0"
             style={{ width: showHiddenSidebar ? sidebarWidth : 0 }}
             onMouseEnter={() => {
               clearHideSidebarCloseTimer();
@@ -767,10 +767,10 @@ export function MainLayout() {
           >
             {/* Sidebar slides in */}
             <div
-              className="overflow-hidden transition-[width] duration-[250ms] ease-in-out shadow-xl"
+              className="h-full min-h-0 overflow-hidden transition-[width] duration-[250ms] ease-in-out shadow-xl"
               style={{ width: showHiddenSidebar ? sidebarWidth : 0 }}
             >
-              <div style={{ width: sidebarWidth }}>
+              <div className="h-full min-h-0" style={{ width: sidebarWidth }}>
                 <Sidebar onConnect={handleSidebarConnect} onConnectMultiple={handleSidebarConnectMultiple} width={sidebarWidth} />
               </div>
             </div>

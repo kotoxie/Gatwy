@@ -1047,7 +1047,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
   return (
     <>
       <aside
-        className="bg-surface-alt border-r border-border flex flex-col shrink-0 overflow-hidden"
+        className="bg-surface-alt border-r border-border flex flex-col shrink-0 overflow-hidden h-full min-h-0"
         style={width !== undefined ? { width } : { width: 240 }}
       >
         {/* Header */}
@@ -1185,7 +1185,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
         {/* Connection list */}
         <div
           className={clsx(
-            'flex-1 py-2 overflow-y-auto transition-colors',
+            'flex-1 min-h-0 py-2 overflow-y-auto transition-colors',
             (draggingConnId || draggingGroupId) && dragOverId === 'ungrouped' && 'bg-accent/5',
           )}
           onDragOver={(e) => { e.preventDefault(); setDragOverId('ungrouped'); }}
