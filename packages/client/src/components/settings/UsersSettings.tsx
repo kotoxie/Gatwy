@@ -44,6 +44,8 @@ interface UserRow {
   lastLoginAt: string | null;
   createdAt: string;
   mfaEnabled: boolean;
+  mfaMethod: string | null;
+  passkeyCount: number;
 }
 
 export function UsersSettings() {
@@ -129,6 +131,12 @@ export function UsersSettings() {
   const [resetPasswordValue, setResetPasswordValue] = useState('');
   const [resetPasswordMsg, setResetPasswordMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [resettingPassword, setResettingPassword] = useState(false);
+
+  // Passkey reset state
+  const [passkeyResetUserId, setPasskeyResetUserId] = useState<string | null>(null);
+  const [passkeyResetReason, setPasskeyResetReason] = useState('');
+  const [passkeyResetMsg, setPasskeyResetMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [resettingPasskeys, setResettingPasskeys] = useState(false);
 
   async function loadUsers() {
     setLoading(true);
@@ -240,6 +248,35 @@ export function UsersSettings() {
       setResetPasswordMsg({ type: 'error', text: 'Network error.' });
     } finally {
       setResettingPassword(false);
+    }
+  }
+
+  async function handleResetPasskeys(userId: string) {
+    if (!passkeyResetReason || passkeyResetReason.trim().length < 5) {
+      setPasskeyResetMsg({ type: 'error', text: 'Reason must be at least 5 characters.' });
+      return;
+    }
+    setResettingPasskeys(true);
+    setPasskeyResetMsg(null);
+    try {
+      const res = await fetch(`/api/v1/users/${userId}/passkeys/reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ reason: passkeyResetReason.trim() }),
+      });
+      const d = await res.json() as { success?: boolean; passkeysDisabled?: number; error?: string };
+      if (res.ok) {
+        setPasskeyResetMsg({ type: 'success', text: `${d.passkeysDisabled || 0} passkey(s) disabled.` });
+        setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, passkeyCount: 0, mfaMethod: null, mfaEnabled: false } : u));
+        setTimeout(() => { setPasskeyResetUserId(null); setPasskeyResetReason(''); setPasskeyResetMsg(null); }, 1500);
+      } else {
+        setPasskeyResetMsg({ type: 'error', text: d.error || 'Failed.' });
+      }
+    } catch {
+      setPasskeyResetMsg({ type: 'error', text: 'Network error.' });
+    } finally {
+      setResettingPasskeys(false);
     }
   }
 
@@ -392,7 +429,7 @@ export function UsersSettings() {
                   <td className="py-3 pr-4">
                     {u.mfaEnabled ? (
                       <span className="flex items-center gap-1 text-green-400 text-xs font-medium">
-                        <MfaShieldIcon /> Enabled
+                        <MfaShieldIcon /> {u.mfaMethod === 'passkey' ? `Passkey (${u.passkeyCount})` : 'TOTP'}
                       </span>
                     ) : (
                       <span className="text-text-secondary text-xs">—</span>
@@ -462,6 +499,45 @@ export function UsersSettings() {
                         </svg>
                         Edit
                       </button>
+                      {u.passkeyCount > 0 && passkeyResetUserId !== u.id && (
+                        <button
+                          onClick={() => { setPasskeyResetUserId(u.id); setPasskeyResetReason(''); setPasskeyResetMsg(null); }}
+                          className="px-2 py-1 text-xs border border-yellow-500/30 rounded text-yellow-400 hover:bg-yellow-500/10"
+                          title="Reset passkeys"
+                        >
+                          Reset Passkeys
+                        </button>
+                      )}
+                      {passkeyResetUserId === u.id && (
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <input
+                            type="text"
+                            value={passkeyResetReason}
+                            onChange={(e) => setPasskeyResetReason(e.target.value)}
+                            placeholder="Reason (min 5 chars)"
+                            className="px-2 py-1 text-xs bg-surface border border-border rounded text-text-primary focus:outline-none focus:ring-1 focus:ring-accent w-36"
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => handleResetPasskeys(u.id)}
+                            disabled={resettingPasskeys || passkeyResetReason.trim().length < 5}
+                            className="px-2 py-1 text-xs bg-yellow-500 text-white rounded hover:bg-yellow-600 disabled:opacity-50"
+                          >
+                            {resettingPasskeys ? '...' : '✓'}
+                          </button>
+                          <button
+                            onClick={() => { setPasskeyResetUserId(null); setPasskeyResetReason(''); setPasskeyResetMsg(null); }}
+                            className="px-2 py-1 text-xs border border-border rounded text-text-secondary hover:bg-surface-hover"
+                          >
+                            ✕
+                          </button>
+                          {passkeyResetMsg && (
+                            <span className={`text-xs ${passkeyResetMsg.type === 'success' ? 'text-green-500' : 'text-red-500'}`}>
+                              {passkeyResetMsg.text}
+                            </span>
+                          )}
+                        </div>
+                      )}
                       <button
                         onClick={() => setDeleteTarget({ id: u.id, username: u.username })}
                         disabled={isSelf}

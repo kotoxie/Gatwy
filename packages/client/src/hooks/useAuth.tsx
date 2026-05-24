@@ -13,6 +13,7 @@ interface User {
 interface LoginResult {
   mfaRequired?: boolean;
   mfaToken?: string;
+  mfaMethod?: 'totp' | 'passkey';
   proxyIp?: string;
 }
 
@@ -145,10 +146,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await apiFetch('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ username, password }),
-    }) as { token?: string; user?: User; mfaRequired?: boolean; mfaToken?: string; proxyIp?: string };
+    }) as { token?: string; user?: User; mfaRequired?: boolean; mfaToken?: string; mfaMethod?: 'totp' | 'passkey'; proxyIp?: string };
 
     if (data.mfaRequired) {
-      return { mfaRequired: true, mfaToken: data.mfaToken };
+      return { mfaRequired: true, mfaToken: data.mfaToken, mfaMethod: data.mfaMethod };
     }
 
     if (data.proxyIp) {

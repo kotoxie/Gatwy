@@ -4,6 +4,7 @@ import { v4 as uuid } from 'uuid';
 import { queryAll, queryOne, execute } from '../db/helpers.js';
 import { authRequired, userCan } from '../middleware/auth.js';
 import { logAudit } from '../services/audit.js';
+import { getUserPasskeys, adminResetPasskeys } from '../services/passkey.js';
 
 const router = Router();
 router.use(authRequired);
@@ -27,6 +28,7 @@ interface UserRow {
   last_login_at: string | null;
   created_at: string;
   mfa_enabled: number;
+  mfa_method: string | null;
 }
 
 // GET / — list all users
@@ -35,23 +37,29 @@ router.get('/', (req: Request, res: Response) => {
 
   const users = queryAll<UserRow>(
     `SELECT id, username, display_name, email, role, failed_login_count,
-            locked_until, last_login_at, created_at, mfa_enabled
+            locked_until, last_login_at, created_at, mfa_enabled, mfa_method
      FROM users ORDER BY created_at ASC`,
   );
 
   res.json({
-    users: users.map((u) => ({
-      id: u.id,
-      username: u.username,
-      displayName: u.display_name,
-      email: u.email,
-      role: u.role,
-      failedLoginCount: u.failed_login_count,
-      lockedUntil: u.locked_until,
-      lastLoginAt: u.last_login_at,
-      createdAt: u.created_at,
-      mfaEnabled: u.mfa_enabled === 1,
-    })),
+    users: users.map((u) => {
+      const passkeys = getUserPasskeys(u.id);
+      const activePasskeys = passkeys.filter((pk) => !pk.disabled_at);
+      return {
+        id: u.id,
+        username: u.username,
+        displayName: u.display_name,
+        email: u.email,
+        role: u.role,
+        failedLoginCount: u.failed_login_count,
+        lockedUntil: u.locked_until,
+        lastLoginAt: u.last_login_at,
+        createdAt: u.created_at,
+        mfaEnabled: u.mfa_enabled === 1,
+        mfaMethod: u.mfa_method || (u.mfa_enabled === 1 ? 'totp' : null),
+        passkeyCount: activePasskeys.length,
+      };
+    }),
   });
 });
 
@@ -264,6 +272,64 @@ router.post('/:id/unlock', (req: Request, res: Response) => {
   });
 
   res.json({ success: true });
+});
+
+// GET /:id/passkeys — get user's passkeys (admin view)
+router.get('/:id/passkeys', (req: Request, res: Response) => {
+  if (!requireManageUsers(req, res)) return;
+
+  const id = req.params.id as string;
+
+  const user = queryOne<{ id: string; username: string }>('SELECT id, username FROM users WHERE id = ?', [id]);
+  if (!user) {
+    res.status(404).json({ error: 'User not found' });
+    return;
+  }
+
+  const passkeys = getUserPasskeys(id);
+  const sanitized = passkeys.map((pk) => ({
+    id: pk.id,
+    name: pk.name,
+    createdAt: pk.created_at,
+    lastUsedAt: pk.last_used_at,
+    disabled: !!pk.disabled_at,
+    disabledAt: pk.disabled_at,
+    disabledReason: pk.revoked_reason,
+    revokedBy: pk.revoked_by,
+  }));
+
+  res.json({ passkeys: sanitized });
+});
+
+// POST /:id/passkeys/reset — admin reset (disable) all passkeys for a user
+router.post('/:id/passkeys/reset', (req: Request, res: Response) => {
+  if (!requireManageUsers(req, res)) return;
+
+  const id = req.params.id as string;
+  const { reason } = req.body as { reason?: string };
+
+  if (!reason || reason.trim().length < 5) {
+    res.status(400).json({ error: 'Reason is required (minimum 5 characters)' });
+    return;
+  }
+
+  const user = queryOne<{ id: string; username: string }>('SELECT id, username FROM users WHERE id = ?', [id]);
+  if (!user) {
+    res.status(404).json({ error: 'User not found' });
+    return;
+  }
+
+  const count = adminResetPasskeys(id, req.user!.userId, reason.trim());
+
+  logAudit({
+    userId: req.user!.userId,
+    eventType: 'auth.passkey_admin_reset',
+    target: user.username,
+    details: { targetUserId: id, passkeysDisabled: count, reason: reason.trim() },
+    ipAddress: req.ip,
+  });
+
+  res.json({ success: true, passkeysDisabled: count });
 });
 
 export default router;

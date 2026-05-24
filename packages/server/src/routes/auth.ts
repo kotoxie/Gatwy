@@ -16,6 +16,13 @@ import { issueWsTicket } from '../services/wsTicket.js';
 import { decrypt } from '../services/encryption.js';
 import { authenticateLdap } from '../services/ldap.js';
 import { buildOidcAuthUrl, handleOidcCallback, isOidcEnabled } from '../services/oidc.js';
+import {
+  isPasskeyEnabled,
+  getActivePasskeys,
+  generatePasskeyAuthenticationOptions,
+  verifyPasskeyAuthentication,
+  cleanupExpiredChallenges,
+} from '../services/passkey.js';
 
 // ── Proxy detection helper ───────────────────────────────────────────────────
 function detectProxyIp(req: Request): string | null {
@@ -257,6 +264,7 @@ interface UserRow {
   locked_until: string | null;
   mfa_enabled: number;
   mfa_secret: string | null;
+  mfa_method: string | null;
   dismissed_warnings_json: string | null;
 }
 
@@ -340,7 +348,7 @@ router.post('/login', async (req: Request, res: Response) => {
   const maxFailed = parseInt(getSetting('security.max_failed_logins'), 10) || 5;
   const lockoutMinutes = parseInt(getSetting('security.lockout_minutes'), 10) || 30;
 
-  const user = queryOne<UserRow>('SELECT id, username, password_hash, display_name, role, theme, failed_login_count, locked_until, mfa_enabled, mfa_secret, dismissed_warnings_json FROM users WHERE username = ? AND auth_provider = \'local\'', [username]);
+  const user = queryOne<UserRow>('SELECT id, username, password_hash, display_name, role, theme, failed_login_count, locked_until, mfa_enabled, mfa_secret, mfa_method, dismissed_warnings_json FROM users WHERE username = ? AND auth_provider = \'local\'', [username]);
 
   if (!user) {
     // Apply lockout to unknown usernames too (in-memory, resets on restart)
@@ -417,10 +425,12 @@ router.post('/login', async (req: Request, res: Response) => {
     [user.id],
   );
 
-  // If MFA is enabled, check for trusted device cookie first
-  if (user.mfa_enabled === 1 && !isTrustedDevice(req, user.id)) {
+  // Only enforce second-factor when TOTP is configured.
+  // Passkeys are treated as an optional alternative sign-in method.
+  if (user.mfa_enabled === 1 && !!user.mfa_secret && !isTrustedDevice(req, user.id)) {
     const mfaToken = signMfaToken(user.id);
-    res.json({ mfaRequired: true, mfaToken });
+    const mfaMethod: 'totp' = 'totp';
+    res.json({ mfaRequired: true, mfaToken, mfaMethod });
     return;
   }
 
@@ -532,6 +542,177 @@ router.post('/login/mfa', async (req: Request, res: Response) => {
     ...(proxyIp ? { proxyIp } : {}),
   });
 });
+
+// POST /login/passkey/options — get passkey authentication options for a user
+router.post('/login/passkey/options', async (req: Request, res: Response) => {
+  const { mfaToken, username } = req.body as { mfaToken?: string; username?: string };
+
+  // Check if passkeys are enabled globally
+  if (!await isPasskeyEnabled()) {
+    res.status(400).json({ error: 'Passkeys are not enabled' });
+    return;
+  }
+
+  const clientIp = (req.ip ?? 'unknown').replace(/^::ffff:/i, '');
+  if (!checkIpRateLimit(clientIp)) {
+    res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
+    return;
+  }
+
+  let userId: string | null = null;
+  if (mfaToken) {
+    try {
+      const payload = verifyMfaToken(mfaToken);
+      userId = payload.userId;
+    } catch {
+      res.status(401).json({ error: 'Invalid or expired MFA token' });
+      return;
+    }
+  } else if (username) {
+    const user = queryOne<{ id: string }>(
+      `SELECT id FROM users WHERE username = ?`,
+      [username],
+    );
+    if (!user) {
+      res.status(400).json({ error: 'Passkey sign in is not available for this account' });
+      return;
+    }
+    userId = user.id;
+  } else {
+    res.status(400).json({ error: 'mfaToken or username is required' });
+    return;
+  }
+
+  // Check if user has active passkeys
+  if (getActivePasskeys(userId).length === 0) {
+    res.status(400).json({ error: 'Passkey sign in is not available for this account' });
+    return;
+  }
+
+  const origin = `${req.protocol}://${req.get('host')}`;
+  const result = await generatePasskeyAuthenticationOptions(userId, origin);
+  
+  if (!result) {
+    res.status(400).json({ error: 'No active passkeys found' });
+    return;
+  }
+
+  res.json({ options: result.options, challengeId: result.challengeId });
+});
+
+// POST /login/passkey — verify passkey authentication
+router.post('/login/passkey', async (req: Request, res: Response) => {
+  const { mfaToken, challengeId, response, trustDevice } = req.body as {
+    mfaToken?: string;
+    challengeId?: string;
+    response?: unknown;
+    trustDevice?: boolean;
+  };
+
+  if (!challengeId || !response) {
+    res.status(400).json({ error: 'challengeId and response are required' });
+    return;
+  }
+
+  const clientIp = (req.ip ?? 'unknown').replace(/^::ffff:/i, '');
+  if (!checkIpRateLimit(clientIp)) {
+    res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
+    return;
+  }
+
+  let expectedUserId: string | null = null;
+  if (mfaToken) {
+    try {
+      const payload = verifyMfaToken(mfaToken);
+      expectedUserId = payload.userId;
+    } catch {
+      res.status(401).json({ error: 'Invalid or expired MFA token' });
+      return;
+    }
+  }
+
+  // MFA brute-force protection
+  if (expectedUserId && !checkMfaRateLimit(expectedUserId)) {
+    res.status(429).json({ error: 'Too many MFA attempts. Please try again later.' });
+    return;
+  }
+
+  const origin = `${req.protocol}://${req.get('host')}`;
+  const result = await verifyPasskeyAuthentication(
+    challengeId,
+    response as Parameters<typeof verifyPasskeyAuthentication>[1],
+    origin,
+  );
+
+  if (!result.success) {
+    logAudit({
+      userId: expectedUserId || undefined,
+      eventType: 'auth.passkey_login_failed',
+      details: { error: result.error },
+      ipAddress: req.ip,
+    });
+    res.status(401).json({ error: result.error || 'Passkey verification failed' });
+    return;
+  }
+
+  // Verify the passkey belongs to the expected user
+  if (expectedUserId && result.userId !== expectedUserId) {
+    res.status(401).json({ error: 'Passkey does not belong to this user' });
+    return;
+  }
+
+  if (expectedUserId) {
+    clearMfaAttempts(expectedUserId);
+  }
+
+  const user = queryOne<UserRow>(
+    'SELECT id, username, display_name, role, theme, dismissed_warnings_json FROM users WHERE id = ?',
+    [result.userId],
+  );
+
+  if (!user) {
+    res.status(401).json({ error: 'User not found' });
+    return;
+  }
+
+  const maxSessionMinutes = parseInt(getSetting('security.max_session_minutes') ?? '0', 10);
+  const token = signToken({ userId: user.id, username: user.username, role: user.role }, maxSessionMinutes || undefined);
+  createLoginSession(req, user.id, token);
+
+  // Set trusted device cookie if requested
+  if (trustDevice) {
+    setTrustedDevice(req, res, user.id);
+  }
+
+  logAudit({
+    userId: user.id,
+    eventType: 'auth.passkey_login_success',
+    target: user.username,
+    details: { passkeyId: result.passkeyId, trustedDevice: !!trustDevice },
+    ipAddress: req.ip,
+  });
+
+  setAuthCookie(res, token, maxSessionMinutes || undefined);
+  const proxyIp = detectProxyIp(req);
+  res.json({
+    token,
+    user: {
+      id: user.id,
+      username: user.username,
+      displayName: user.display_name,
+      role: user.role,
+      theme: user.theme,
+      permissions: getPermissionsForRole(user.role),
+      dismissedWarnings: parseDismissedWarnings(user.dismissed_warnings_json),
+    },
+    ...(proxyIp ? { proxyIp } : {}),
+  });
+});
+
+// Cleanup expired passkey challenges periodically
+setInterval(() => {
+  cleanupExpiredChallenges();
+}, 5 * 60 * 1000); // Every 5 minutes
 
 // Logout — revoke the current session token
 router.post('/logout', authRequired, (req: Request, res: Response) => {

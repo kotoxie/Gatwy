@@ -63,6 +63,12 @@ export function SecuritySettings() {
   const [proxyMsg, setProxyMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [savingProxy, setSavingProxy] = useState(false);
 
+  // Passkey settings
+  const [passkeyEnabled, setPasskeyEnabled] = useState(true);
+  const [passkeyInactiveDays, setPasskeyInactiveDays] = useState('90');
+  const [passkeyMsg, setPasskeyMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [savingPasskey, setSavingPasskey] = useState(false);
+
   useEffect(() => {
     setIdleTimeout(settings['security.idle_timeout_minutes'] ?? '0');
     setMaxSessionMinutes(settings['security.max_session_minutes'] ?? '0');
@@ -73,6 +79,8 @@ export function SecuritySettings() {
     setMaxConnPerUser(settings['security.max_connections_per_user'] ?? '10');
     setTrustedProxies(settings['security.trusted_proxies'] ?? '');
     setProxyDetectionEnabled(settings['security.proxy_detection_enabled'] !== 'false');
+    setPasskeyEnabled(settings['security.passkey_enabled'] !== 'false');
+    setPasskeyInactiveDays(settings['security.passkey_inactive_days'] ?? '90');
 
   }, [settings]);
 
@@ -251,6 +259,26 @@ export function SecuritySettings() {
     }
   }
 
+  async function handlePasskeySave(e: FormEvent) {
+    e.preventDefault();
+    setSavingPasskey(true);
+    setPasskeyMsg(null);
+    try {
+      await saveSetting(
+        {
+          'security.passkey_enabled': String(passkeyEnabled),
+          'security.passkey_inactive_days': passkeyInactiveDays,
+        },
+        () => setPasskeyMsg({ type: 'success', text: 'Saved.' }),
+        (msg) => setPasskeyMsg({ type: 'error', text: msg }),
+      );
+    } catch {
+      setPasskeyMsg({ type: 'error', text: 'Network error.' });
+    } finally {
+      setSavingPasskey(false);
+    }
+  }
+
   return (
     <div className="max-w-lg space-y-8">
       {/* Session Timeouts */}
@@ -295,6 +323,64 @@ export function SecuritySettings() {
             className="px-4 py-2 bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50 text-sm font-medium"
           >
             {savingSession ? 'Saving...' : 'Save'}
+          </button>
+        </form>
+      </section>
+
+      <hr className="border-border" />
+
+      {/* Passkeys */}
+      <section>
+        <h2 className="text-base font-semibold text-text-primary mb-1">Passkeys (WebAuthn)</h2>
+        <p className="text-sm text-text-secondary mb-4">Configure passwordless two-factor authentication using passkeys.</p>
+        <form onSubmit={handlePasskeySave} className="space-y-4">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setPasskeyEnabled((v) => !v)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                passkeyEnabled ? 'bg-accent' : 'bg-surface-hover border border-border'
+              }`}
+            >
+              <span
+                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                  passkeyEnabled ? 'translate-x-4' : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+            <div>
+              <span className="text-sm text-text-secondary">Enable passkeys</span>
+              <p className="text-xs text-text-secondary">Allow users to register passkeys for two-factor authentication.</p>
+            </div>
+          </div>
+          {passkeyEnabled && (
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-1">
+                Auto-disable inactive passkeys after (days) <span className="font-normal">— 0 = never</span>
+              </label>
+              <p className="text-xs text-text-secondary mb-1">
+                Passkeys that haven't been used within this period will be automatically disabled for security.
+              </p>
+              <input
+                type="number"
+                min="0"
+                value={passkeyInactiveDays}
+                onChange={(e) => setPasskeyInactiveDays(e.target.value)}
+                className="w-40 px-3 py-2 bg-surface border border-border rounded text-text-primary focus:outline-none focus:ring-2 focus:ring-accent text-sm"
+              />
+            </div>
+          )}
+          {passkeyMsg && (
+            <p className={`text-sm ${passkeyMsg.type === 'success' ? 'text-green-500' : 'text-red-500'}`}>
+              {passkeyMsg.text}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={savingPasskey}
+            className="px-4 py-2 bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50 text-sm font-medium"
+          >
+            {savingPasskey ? 'Saving...' : 'Save'}
           </button>
         </form>
       </section>

@@ -676,6 +676,48 @@ function runMigrations() {
           ('auto_backup.auto_disabled', 'false')`);
       },
     },
+    {
+      version: 16,
+      run: (database: Database) => {
+        // Passkeys (WebAuthn) support
+        database.run(`CREATE TABLE IF NOT EXISTS user_passkeys (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          credential_id TEXT NOT NULL UNIQUE,
+          public_key TEXT NOT NULL,
+          sign_count INTEGER NOT NULL DEFAULT 0,
+          transports TEXT,
+          aaguid TEXT,
+          name TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          last_used_at TEXT,
+          disabled_at TEXT,
+          revoked_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+          revoked_reason TEXT
+        )`);
+        database.run('CREATE INDEX IF NOT EXISTS idx_user_passkeys_user ON user_passkeys(user_id)');
+        database.run('CREATE INDEX IF NOT EXISTS idx_user_passkeys_credential ON user_passkeys(credential_id)');
+
+        // Passkey challenges (ephemeral, cleaned up periodically)
+        database.run(`CREATE TABLE IF NOT EXISTS passkey_challenges (
+          id TEXT PRIMARY KEY,
+          user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+          challenge TEXT NOT NULL,
+          type TEXT NOT NULL CHECK(type IN ('registration', 'authentication')),
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          expires_at TEXT NOT NULL
+        )`);
+        database.run('CREATE INDEX IF NOT EXISTS idx_passkey_challenges_user ON passkey_challenges(user_id)');
+
+        // Add passkey-related settings
+        database.run(`INSERT OR IGNORE INTO settings (key, value) VALUES
+          ('security.passkey_enabled', 'true'),
+          ('security.passkey_inactive_days', '90')`);
+
+        // Add mfa_method column to users table to track which MFA method is active
+        try { database.run('ALTER TABLE users ADD COLUMN mfa_method TEXT'); } catch { /* already exists */ }
+      },
+    },
   ];
 
   for (const migration of migrations) {
