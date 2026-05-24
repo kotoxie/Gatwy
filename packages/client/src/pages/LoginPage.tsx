@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, type FormEvent } from 'react';
 import { useAuth } from '../hooks/useAuth';
+import { startAuthentication } from '@simplewebauthn/browser';
 
 interface ProvidersConfig {
   local: boolean;
@@ -25,8 +26,10 @@ export function LoginPage() {
   // MFA step
   const [mfaRequired, setMfaRequired] = useState(false);
   const [mfaToken, setMfaToken] = useState('');
+  const [mfaMethod, setMfaMethod] = useState<'totp' | 'passkey'>('totp');
   const [mfaCode, setMfaCode] = useState('');
   const [trustDevice, setTrustDevice] = useState(false);
+  const [passkeyLoading, setPasskeyLoading] = useState(false);
   const autoSubmittingRef = useRef(false);
 
   useEffect(() => {
@@ -86,6 +89,7 @@ export function LoginPage() {
         const result = await login(username, password);
         if (result.mfaRequired && result.mfaToken) {
           setMfaToken(result.mfaToken);
+          setMfaMethod(result.mfaMethod || 'totp');
           setMfaRequired(true);
         }
       }
@@ -131,6 +135,121 @@ export function LoginPage() {
     await submitMfaCode(mfaCode);
   }
 
+  async function handlePasskeyAuth() {
+    if (passkeyLoading) return;
+    setPasskeyLoading(true);
+    setError('');
+
+    try {
+      // Get authentication options from server
+      const optionsRes = await fetch('/api/v1/auth/login/passkey/options', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mfaToken }),
+      });
+      const optionsData = await optionsRes.json() as { options?: unknown; challengeId?: string; error?: string };
+      
+      if (!optionsRes.ok || !optionsData.options || !optionsData.challengeId) {
+        throw new Error(optionsData.error || 'Failed to get passkey options');
+      }
+
+      // Trigger browser's passkey prompt
+      const authResponse = await startAuthentication({ optionsJSON: optionsData.options as Parameters<typeof startAuthentication>[0]['optionsJSON'] });
+
+      // Verify with server
+      const verifyRes = await fetch('/api/v1/auth/login/passkey', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mfaToken,
+          challengeId: optionsData.challengeId,
+          response: authResponse,
+          trustDevice,
+        }),
+      });
+      const verifyData = await verifyRes.json() as { token?: string; user?: unknown; error?: string };
+
+      if (!verifyRes.ok) {
+        throw new Error(verifyData.error || 'Passkey verification failed');
+      }
+
+      // Success - reload to pick up the new session
+      window.location.reload();
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        // Handle user cancellation gracefully
+        if (err.name === 'NotAllowedError') {
+          setError('Passkey authentication was cancelled');
+        } else {
+          setError(err.message);
+        }
+      } else {
+        setError('Passkey authentication failed');
+      }
+    } finally {
+      setPasskeyLoading(false);
+    }
+  }
+
+  async function handleDirectPasskeyLogin() {
+    if (passkeyLoading) return;
+    if (!username.trim()) {
+      setError('Username is required for passkey sign in');
+      return;
+    }
+
+    setPasskeyLoading(true);
+    setError('');
+    setSsoError(null);
+
+    try {
+      const optionsRes = await fetch('/api/v1/auth/login/passkey/options', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username.trim() }),
+      });
+      const optionsData = await optionsRes.json() as { options?: unknown; challengeId?: string; error?: string };
+
+      if (!optionsRes.ok || !optionsData.options || !optionsData.challengeId) {
+        throw new Error(optionsData.error || 'Failed to start passkey sign in');
+      }
+
+      const authResponse = await startAuthentication({ optionsJSON: optionsData.options as Parameters<typeof startAuthentication>[0]['optionsJSON'] });
+
+      const verifyRes = await fetch('/api/v1/auth/login/passkey', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          challengeId: optionsData.challengeId,
+          response: authResponse,
+        }),
+      });
+      const verifyData = await verifyRes.json() as { error?: string };
+
+      if (!verifyRes.ok) {
+        throw new Error(verifyData.error || 'Passkey sign in failed');
+      }
+
+      window.location.reload();
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        if (err.name === 'NotAllowedError') {
+          setError('Passkey authentication was cancelled');
+        } else {
+          setError(err.message);
+        }
+      } else {
+        setError('Passkey sign in failed');
+      }
+    } finally {
+      setPasskeyLoading(false);
+    }
+  }
+
   // Auto-submit when all 6 digits are entered
   useEffect(() => {
     if (mfaCode.length === 6 && !submitting && !autoSubmittingRef.current) {
@@ -156,53 +275,106 @@ export function LoginPage() {
             )}
             <p className="text-text-secondary mt-2">Two-factor authentication</p>
           </div>
-          <form onSubmit={handleMfaSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">
-                Authenticator code
+
+          {mfaMethod === 'passkey' ? (
+            <div className="space-y-4">
+              <div className="text-center py-6">
+                <div className="text-5xl mb-4">🔐</div>
+                <p className="text-text-secondary text-sm">
+                  Use your passkey to complete sign in.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handlePasskeyAuth}
+                disabled={passkeyLoading}
+                className="w-full py-3 px-4 bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50 font-medium flex items-center justify-center gap-2"
+              >
+                {passkeyLoading ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Waiting for passkey...
+                  </>
+                ) : (
+                  <>
+                    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M15 7a3 3 0 11-6 0 3 3 0 016 0zM7 21v-2a4 4 0 014-4h2" />
+                      <path d="M16 16l2.5 2.5M21 18.5a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
+                    </svg>
+                    Continue with Passkey
+                  </>
+                )}
+              </button>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={trustDevice}
+                  onChange={(e) => setTrustDevice(e.target.checked)}
+                  className="w-4 h-4 accent-accent rounded"
+                />
+                <span className="text-sm text-text-secondary">Don't ask for MFA on this device for 30 days</span>
               </label>
-              <input
-                type="text"
-                inputMode="numeric"
-                pattern="[0-9]{6}"
-                maxLength={6}
-                value={mfaCode}
-                onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                required
-                autoFocus
-                placeholder="000000"
-                disabled={submitting}
-                className="w-full px-3 py-2 bg-surface border border-border rounded text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent text-center text-xl tracking-widest disabled:opacity-60"
-              />
-              <p className="text-xs text-text-secondary mt-1">
-                {submitting ? 'Verifying…' : 'Enter the 6-digit code — it submits automatically.'}
-              </p>
+              {error && <p className="text-red-500 text-sm">{error}</p>}
+              <button
+                type="button"
+                onClick={() => { setMfaRequired(false); setMfaCode(''); setMfaToken(''); setError(''); }}
+                className="w-full py-2 px-4 border border-border rounded text-text-secondary hover:bg-surface-hover text-sm"
+              >
+                Back to login
+              </button>
             </div>
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={trustDevice}
-                onChange={(e) => setTrustDevice(e.target.checked)}
-                className="w-4 h-4 accent-accent rounded"
-              />
-              <span className="text-sm text-text-secondary">Don't ask for MFA on this device for 30 days</span>
-            </label>
-            {error && <p className="text-red-500 text-sm">{error}</p>}
-            <button
-              type="submit"
-              disabled={submitting || mfaCode.length < 6}
-              className="w-full py-2 px-4 bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50 font-medium"
-            >
-              {submitting ? 'Verifying...' : 'Verify'}
-            </button>
-            <button
-              type="button"
-              onClick={() => { setMfaRequired(false); setMfaCode(''); setMfaToken(''); setError(''); }}
-              className="w-full py-2 px-4 border border-border rounded text-text-secondary hover:bg-surface-hover text-sm"
-            >
-              Back to login
-            </button>
-          </form>
+          ) : (
+            <form onSubmit={handleMfaSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-1">
+                  Authenticator code
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  required
+                  autoFocus
+                  placeholder="000000"
+                  disabled={submitting}
+                  className="w-full px-3 py-2 bg-surface border border-border rounded text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent text-center text-xl tracking-widest disabled:opacity-60"
+                />
+                <p className="text-xs text-text-secondary mt-1">
+                  {submitting ? 'Verifying…' : 'Enter the 6-digit code — it submits automatically.'}
+                </p>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={trustDevice}
+                  onChange={(e) => setTrustDevice(e.target.checked)}
+                  className="w-4 h-4 accent-accent rounded"
+                />
+                <span className="text-sm text-text-secondary">Don't ask for MFA on this device for 30 days</span>
+              </label>
+              {error && <p className="text-red-500 text-sm">{error}</p>}
+              <button
+                type="submit"
+                disabled={submitting || mfaCode.length < 6}
+                className="w-full py-2 px-4 bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50 font-medium"
+              >
+                {submitting ? 'Verifying...' : 'Verify'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setMfaRequired(false); setMfaCode(''); setMfaToken(''); setError(''); }}
+                className="w-full py-2 px-4 border border-border rounded text-text-secondary hover:bg-surface-hover text-sm"
+              >
+                Back to login
+              </button>
+            </form>
+          )}
         </div>
       </div>
     );
@@ -283,6 +455,14 @@ export function LoginPage() {
               className="w-full py-2 px-4 bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50 font-medium"
             >
               {submitting ? 'Signing in...' : 'Sign In'}
+            </button>
+            <button
+              type="button"
+              onClick={handleDirectPasskeyLogin}
+              disabled={submitting || passkeyLoading}
+              className="w-full py-2 px-4 border border-border rounded text-text-primary hover:bg-surface-hover disabled:opacity-50 font-medium"
+            >
+              {passkeyLoading ? 'Waiting for passkey...' : 'Sign in with Passkey'}
             </button>
           </form>
         )}

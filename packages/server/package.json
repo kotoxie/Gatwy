@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@marsaud/smb2": "^0.18.0",
+    "@simplewebauthn/server": "^13.3.0",
     "basic-ftp": "^5.3.1",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",

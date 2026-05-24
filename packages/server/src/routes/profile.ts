@@ -8,6 +8,17 @@ import { getPermissionsForRole } from '../services/permissions.js';
 import { generateSecret as otpGenerateSecret, verifySync as otpVerify, generateURI as otpGenerateURI } from 'otplib';
 import QRCode from 'qrcode';
 import { encrypt, decrypt } from '../services/encryption.js';
+import {
+  isPasskeyEnabled,
+  getUserPasskeys,
+  getActivePasskeys,
+  canAddPasskey,
+  generatePasskeyRegistrationOptions,
+  verifyPasskeyRegistration,
+  renamePasskey,
+  removePasskey,
+  type StoredPasskey,
+} from '../services/passkey.js';
 
 const router = Router();
 router.use(authRequired);
@@ -295,6 +306,189 @@ router.post('/dismiss-warning', (req: Request, res: Response) => {
   if (!current.includes(warning)) current.push(warning);
   execute('UPDATE users SET dismissed_warnings_json = ? WHERE id = ?', [JSON.stringify(current), userId]);
   res.json({ ok: true });
+});
+
+// ── Passkey Management ─────────────────────────────────────────────────────────
+
+// GET /passkeys — list user's passkeys
+router.get('/passkeys', async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+
+  if (!await isPasskeyEnabled()) {
+    res.status(400).json({ error: 'Passkeys are not enabled' });
+    return;
+  }
+
+  const passkeys = getUserPasskeys(userId);
+  // Return sanitized passkey info (no sensitive data)
+  const sanitized = passkeys.map((pk) => ({
+    id: pk.id,
+    name: pk.name,
+    createdAt: pk.created_at,
+    lastUsedAt: pk.last_used_at,
+    disabled: !!pk.disabled_at,
+    disabledReason: pk.revoked_reason,
+  }));
+
+  res.json({ passkeys: sanitized, canAdd: canAddPasskey(userId), maxPasskeys: 3 });
+});
+
+// POST /passkeys/register/options — get registration options for a new passkey
+router.post('/passkeys/register/options', async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+
+  if (!await isPasskeyEnabled()) {
+    res.status(400).json({ error: 'Passkeys are not enabled' });
+    return;
+  }
+
+  if (!canAddPasskey(userId)) {
+    res.status(400).json({ error: 'Maximum passkeys limit reached (3)' });
+    return;
+  }
+
+  const user = queryOne<{ username: string; display_name: string }>(
+    'SELECT username, display_name FROM users WHERE id = ?',
+    [userId],
+  );
+  if (!user) {
+    res.status(404).json({ error: 'User not found' });
+    return;
+  }
+
+  const origin = `${req.protocol}://${req.get('host')}`;
+  const { options, challengeId } = await generatePasskeyRegistrationOptions(
+    userId,
+    user.username,
+    user.display_name,
+    origin,
+  );
+
+  res.json({ options, challengeId });
+});
+
+// POST /passkeys/register/verify — verify registration and store passkey
+router.post('/passkeys/register/verify', async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const { challengeId, response, name } = req.body as {
+    challengeId?: string;
+    response?: unknown;
+    name?: string;
+  };
+
+  if (!challengeId || !response || !name) {
+    res.status(400).json({ error: 'challengeId, response, and name are required' });
+    return;
+  }
+
+  if (!await isPasskeyEnabled()) {
+    res.status(400).json({ error: 'Passkeys are not enabled' });
+    return;
+  }
+
+  const origin = `${req.protocol}://${req.get('host')}`;
+  const result = await verifyPasskeyRegistration(
+    challengeId,
+    response as Parameters<typeof verifyPasskeyRegistration>[1],
+    origin,
+    name,
+  );
+
+  if (!result.success) {
+    res.status(400).json({ error: result.error || 'Registration failed' });
+    return;
+  }
+
+  logAudit({
+    userId,
+    eventType: 'auth.passkey_registered',
+    target: req.user!.username,
+    details: { passkeyId: result.passkey?.id, passkeyName: name },
+    ipAddress: req.ip,
+  });
+
+  res.json({
+    ok: true,
+    passkey: result.passkey ? {
+      id: result.passkey.id,
+      name: result.passkey.name,
+      createdAt: result.passkey.created_at,
+    } : undefined,
+  });
+});
+
+// PUT /passkeys/:id — rename a passkey
+router.put('/passkeys/:id', (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const passkeyId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const { name } = req.body as { name?: string };
+
+  if (!passkeyId) {
+    res.status(400).json({ error: 'Invalid passkey id' });
+    return;
+  }
+
+  if (!name) {
+    res.status(400).json({ error: 'name is required' });
+    return;
+  }
+
+  const success = renamePasskey(passkeyId, userId, name);
+  if (!success) {
+    res.status(404).json({ error: 'Passkey not found' });
+    return;
+  }
+
+  logAudit({
+    userId,
+    eventType: 'auth.passkey_renamed',
+    target: req.user!.username,
+    details: { passkeyId, newName: name },
+    ipAddress: req.ip,
+  });
+
+  res.json({ ok: true });
+});
+
+// DELETE /passkeys/:id — remove a passkey
+router.delete('/passkeys/:id', (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const passkeyId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+  if (!passkeyId) {
+    res.status(400).json({ error: 'Invalid passkey id' });
+    return;
+  }
+
+  const success = removePasskey(passkeyId, userId);
+  if (!success) {
+    res.status(404).json({ error: 'Passkey not found' });
+    return;
+  }
+
+  logAudit({
+    userId,
+    eventType: 'auth.passkey_removed',
+    target: req.user!.username,
+    details: { passkeyId },
+    ipAddress: req.ip,
+  });
+
+  res.json({ ok: true });
+});
+
+// GET /mfa/method — get current MFA method
+router.get('/mfa/method', (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const user = queryOne<{ mfa_enabled: number; mfa_method: string | null }>(
+    'SELECT mfa_enabled, mfa_method FROM users WHERE id = ?',
+    [userId],
+  );
+
+  res.json({
+    enabled: user?.mfa_enabled === 1,
+    method: user?.mfa_method || (user?.mfa_enabled === 1 ? 'totp' : null),
+  });
 });
 
 export default router;
