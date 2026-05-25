@@ -39,7 +39,15 @@ interface AutoHistoryRow {
   error_message: string | null;
 }
 
+interface AutoHistoryResponse {
+  rows: AutoHistoryRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 type Tab = 'manual' | 'auto';
+const HISTORY_PAGE_SIZE = 10;
 
 function fmtBytes(b: number): string {
   if (!Number.isFinite(b) || b <= 0) return '0 B';
@@ -277,6 +285,7 @@ function AutoBackupTab() {
   const hasSmbPermission = user?.permissions?.includes('protocols.smb') ?? false;
 
   const [loading, setLoading] = useState(true);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [runningNow, setRunningNow] = useState(false);
@@ -297,6 +306,8 @@ function AutoBackupTab() {
   });
   const [status, setStatus] = useState<AutoStatus | null>(null);
   const [history, setHistory] = useState<AutoHistoryRow[]>([]);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyTotal, setHistoryTotal] = useState(0);
   const [connections, setConnections] = useState<SmbConnection[]>([]);
 
   const [globalPassword, setGlobalPassword] = useState('');
@@ -304,6 +315,8 @@ function AutoBackupTab() {
   const [hasPassword, setHasPassword] = useState(false);
 
   const [adhocOpen, setAdhocOpen] = useState(false);
+  const [showConfigDetails, setShowConfigDetails] = useState(true);
+  const collapseInitRef = useRef(false);
   const [adhoc, setAdhoc] = useState({ host: '', port: 445, share: '', username: '', password: '', domain: '' });
   const [adhocHasPassword, setAdhocHasPassword] = useState(false);
 
@@ -317,14 +330,41 @@ function AutoBackupTab() {
     { value: 6, label: 'Saturday' },
   ];
 
+  function isConfigAlreadySet(
+    cfg: AutoConfig,
+    hasGlobalPw: boolean,
+    hasAdhocPw: boolean,
+    adhocCfg: { host: string; share: string },
+  ): boolean {
+    if (!hasGlobalPw) return false;
+    if (cfg.destinationMode === 'saved') {
+      return !!cfg.connectionId;
+    }
+    return !!adhocCfg.host && !!adhocCfg.share && hasAdhocPw;
+  }
+
+  async function loadHistory(page: number) {
+    setHistoryLoading(true);
+    try {
+      const histRes = await fetch(`/api/v1/backup/auto/history?limit=${HISTORY_PAGE_SIZE}&page=${page}`, { credentials: 'include' });
+      if (histRes.ok) {
+        const data = await histRes.json() as AutoHistoryResponse;
+        setHistory(data.rows ?? []);
+        setHistoryTotal(Number.isFinite(data.total) ? data.total : 0);
+        setHistoryPage(Number.isFinite(data.page) ? data.page : page);
+      }
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
   async function load() {
     setLoading(true);
     setMsg(null);
     try {
-      const [cfgRes, stRes, histRes, conRes, capRes] = await Promise.all([
+      const [cfgRes, stRes, conRes, capRes] = await Promise.all([
         fetch('/api/v1/backup/auto/config', { credentials: 'include' }),
         fetch('/api/v1/backup/auto/status', { credentials: 'include' }),
-        fetch('/api/v1/backup/auto/history?limit=30', { credentials: 'include' }),
         fetch('/api/v1/backup/auto/connections', { credentials: 'include' }),
         fetch('/api/v1/backup/auto/capabilities', { credentials: 'include' }),
       ]);
@@ -353,6 +393,15 @@ function AutoBackupTab() {
           domain: data.adhoc.domain || '',
           password: '',
         }));
+
+        if (!collapseInitRef.current) {
+          const configured = isConfigAlreadySet(data.config, data.hasPassword, data.hasAdhocPassword, {
+            host: data.adhoc.host || '',
+            share: data.adhoc.share || '',
+          });
+          setShowConfigDetails(!configured);
+          collapseInitRef.current = true;
+        }
       }
 
       if (stRes.ok) {
@@ -360,15 +409,12 @@ function AutoBackupTab() {
         setStatus(data.status);
       }
 
-      if (histRes.ok) {
-        const data = await histRes.json() as { rows: AutoHistoryRow[] };
-        setHistory(data.rows ?? []);
-      }
-
       if (conRes.ok) {
         const data = await conRes.json() as { connections: SmbConnection[] };
         setConnections(data.connections ?? []);
       }
+
+      await loadHistory(1);
     } finally {
       setLoading(false);
     }
@@ -377,6 +423,13 @@ function AutoBackupTab() {
   useEffect(() => {
     void load();
   }, []);
+
+  const totalHistoryPages = Math.max(1, Math.ceil(historyTotal / HISTORY_PAGE_SIZE));
+
+  async function goToHistoryPage(nextPage: number) {
+    const page = Math.max(1, Math.min(totalHistoryPages, nextPage));
+    await loadHistory(page);
+  }
 
   async function saveConfig() {
     setSaving(true);
@@ -506,25 +559,56 @@ function AutoBackupTab() {
               <h2 className="text-base font-semibold text-text-primary">Configuration</h2>
               <p className="text-xs text-text-secondary mt-0.5">Single scheduled job. SMB destination only.</p>
             </div>
+            {!loading && (
+              <button
+                onClick={() => setShowConfigDetails((v) => !v)}
+                className="px-3 py-1.5 border border-border rounded text-text-secondary hover:bg-surface-hover text-xs"
+              >
+                {showConfigDetails ? 'Collapse' : 'Expand'}
+              </button>
+            )}
           </div>
           {loading ? (
             <p className="text-sm text-text-secondary">Loading auto-backup configuration...</p>
           ) : (
             <>
-              <div className="rounded-xl border border-border bg-surface-hover/60 p-3">
-                <label className="flex items-center justify-between gap-3 cursor-pointer select-none">
-                  <span className="text-sm font-medium text-text-primary">Enable scheduled auto-backup</span>
-                  <Toggle checked={config.enabled} onChange={(v) => setConfig((p) => ({ ...p, enabled: v }))} />
-                </label>
-              </div>
+              {!showConfigDetails && (
+                <div className="rounded-xl border border-border bg-surface-hover/60 p-3 space-y-2 text-sm">
+                  <div className="flex justify-between gap-3">
+                    <span className="text-text-secondary">Enabled</span>
+                    <span className="text-text-primary">{config.enabled ? 'Yes' : 'No'}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-text-secondary">Destination mode</span>
+                    <span className="text-text-primary">{config.destinationMode === 'saved' ? 'Saved SMB connection' : 'Ad-hoc SMB destination'}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-text-secondary">Schedule</span>
+                    <span className="text-text-primary">{config.scheduleType === 'weekly' ? `Weekly at ${config.scheduleTime}` : `Daily at ${config.scheduleTime}`}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-text-secondary">Retention</span>
+                    <span className="text-text-primary">{config.retentionCount} backups</span>
+                  </div>
+                </div>
+              )}
 
-              <div className="rounded-xl border border-border bg-surface-hover/40 p-3 space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-text-secondary">Global Password</p>
-                <input type="password" value={globalPassword} onChange={(e) => setGlobalPassword(e.target.value)} placeholder={hasPassword ? 'Leave blank to keep existing global password' : 'Global backup password (min 8 chars)'} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm" />
-                <input type="password" value={globalPasswordConfirm} onChange={(e) => setGlobalPasswordConfirm(e.target.value)} placeholder="Confirm global password" className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm" />
-              </div>
+              {showConfigDetails && (
+                <>
+                  <div className="rounded-xl border border-border bg-surface-hover/60 p-3">
+                    <label className="flex items-center justify-between gap-3 cursor-pointer select-none">
+                      <span className="text-sm font-medium text-text-primary">Enable scheduled auto-backup</span>
+                      <Toggle checked={config.enabled} onChange={(v) => setConfig((p) => ({ ...p, enabled: v }))} />
+                    </label>
+                  </div>
 
-              <div className="rounded-xl border border-border bg-surface-hover/40 p-3 space-y-2">
+                  <div className="rounded-xl border border-border bg-surface-hover/40 p-3 space-y-2">
+                    <p className="text-xs font-medium uppercase tracking-wide text-text-secondary">Global Password</p>
+                    <input type="password" value={globalPassword} onChange={(e) => setGlobalPassword(e.target.value)} placeholder={hasPassword ? 'Leave blank to keep existing global password' : 'Global backup password (min 8 chars)'} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm" />
+                    <input type="password" value={globalPasswordConfirm} onChange={(e) => setGlobalPasswordConfirm(e.target.value)} placeholder="Confirm global password" className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm" />
+                  </div>
+
+                  <div className="rounded-xl border border-border bg-surface-hover/40 p-3 space-y-2">
                 <p className="text-xs font-medium uppercase tracking-wide text-text-secondary">Destination Mode</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <button
@@ -542,9 +626,9 @@ function AutoBackupTab() {
                     Ad-hoc SMB destination
                   </button>
                 </div>
-              </div>
+                  </div>
 
-              {config.destinationMode === 'saved' && (
+                  {config.destinationMode === 'saved' && (
                 <div className="rounded-xl border border-border bg-surface-hover/40 p-3 space-y-2">
                   <p className="text-xs font-medium uppercase tracking-wide text-text-secondary">Saved Destination</p>
                   <select value={config.connectionId} onChange={(e) => setConfig((p) => ({ ...p, connectionId: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm">
@@ -552,9 +636,9 @@ function AutoBackupTab() {
                     {connections.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.host}:{c.port})</option>)}
                   </select>
                 </div>
-              )}
+                  )}
 
-              {config.destinationMode === 'adhoc' && (
+                  {config.destinationMode === 'adhoc' && (
                 <details className="rounded-xl border border-border bg-surface-hover/40" open={adhocOpen} onToggle={(e) => setAdhocOpen((e.target as HTMLDetailsElement).open)}>
                   <summary className="px-3 py-2 text-sm cursor-pointer text-text-primary font-medium">Optional ad-hoc SMB settings</summary>
                   <div className="px-3 pb-3 space-y-2">
@@ -568,9 +652,9 @@ function AutoBackupTab() {
                     <input type="text" value={adhoc.domain} onChange={(e) => setAdhoc((p) => ({ ...p, domain: e.target.value }))} placeholder="Domain (optional)" className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm" />
                   </div>
                 </details>
-              )}
+                  )}
 
-              <div className="rounded-xl border border-border bg-surface-hover/40 p-3 space-y-3">
+                  <div className="rounded-xl border border-border bg-surface-hover/40 p-3 space-y-3">
                 <p className="text-xs font-medium uppercase tracking-wide text-text-secondary">Schedule & Retention</p>
                 <input type="text" value={config.remotePath} onChange={(e) => setConfig((p) => ({ ...p, remotePath: e.target.value }))} placeholder="Remote folder path" className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm" />
 
@@ -599,15 +683,17 @@ function AutoBackupTab() {
                     <input type="number" min="1" max="365" value={config.retentionCount} onChange={(e) => setConfig((p) => ({ ...p, retentionCount: parseInt(e.target.value || '1', 10) }))} className="w-28 px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm" />
                   </div>
                 </div>
-              </div>
+                  </div>
 
-              <p className="text-xs text-text-secondary">Max backup size is enforced server-side at 4 GB.</p>
+                  <p className="text-xs text-text-secondary">Max backup size is enforced server-side at 4 GB.</p>
 
-              <div className="flex flex-wrap gap-2">
-                <button onClick={saveConfig} disabled={saving} className="px-4 py-2 bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50 text-sm font-medium">{saving ? 'Saving...' : 'Save'}</button>
-                <button onClick={testDestination} disabled={testing} className="px-4 py-2 border border-border rounded text-text-secondary hover:bg-surface-hover disabled:opacity-50 text-sm font-medium">{testing ? 'Testing...' : 'Test Destination'}</button>
-                <button onClick={runNow} disabled={runningNow} className="px-4 py-2 border border-border rounded text-text-secondary hover:bg-surface-hover disabled:opacity-50 text-sm font-medium">{runningNow ? 'Running...' : 'Run Now'}</button>
-              </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button onClick={saveConfig} disabled={saving} className="px-4 py-2 bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50 text-sm font-medium">{saving ? 'Saving...' : 'Save'}</button>
+                    <button onClick={testDestination} disabled={testing} className="px-4 py-2 border border-border rounded text-text-secondary hover:bg-surface-hover disabled:opacity-50 text-sm font-medium">{testing ? 'Testing...' : 'Test Destination'}</button>
+                    <button onClick={runNow} disabled={runningNow} className="px-4 py-2 border border-border rounded text-text-secondary hover:bg-surface-hover disabled:opacity-50 text-sm font-medium">{runningNow ? 'Running...' : 'Run Now'}</button>
+                  </div>
+                </>
+              )}
 
               {msg && <p className={`text-sm ${msg.type === 'success' ? 'text-green-500' : 'text-red-500'}`}>{msg.text}</p>}
             </>
@@ -640,7 +726,7 @@ function AutoBackupTab() {
       <section className="border border-border rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-text-primary">Run History</h2>
-          <button onClick={() => void load()} className="px-3 py-1.5 border border-border rounded text-text-secondary hover:bg-surface-hover text-sm">Refresh</button>
+          <button onClick={() => void loadHistory(historyPage)} className="px-3 py-1.5 border border-border rounded text-text-secondary hover:bg-surface-hover text-sm">Refresh</button>
         </div>
         <p className="text-sm text-text-secondary">History retention is 90 days.</p>
         <div className="overflow-x-auto">
@@ -656,7 +742,12 @@ function AutoBackupTab() {
               </tr>
             </thead>
             <tbody>
-              {history.length === 0 && (
+              {historyLoading && (
+                <tr>
+                  <td className="py-3 text-text-secondary" colSpan={6}>Loading history...</td>
+                </tr>
+              )}
+              {!historyLoading && history.length === 0 && (
                 <tr>
                   <td className="py-3 text-text-secondary" colSpan={6}>No runs yet.</td>
                 </tr>
@@ -673,6 +764,29 @@ function AutoBackupTab() {
               ))}
             </tbody>
           </table>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs text-text-secondary">
+            Showing {history.length === 0 ? 0 : (historyPage - 1) * HISTORY_PAGE_SIZE + 1}
+            {history.length > 0 ? `-${(historyPage - 1) * HISTORY_PAGE_SIZE + history.length}` : ''} of {historyTotal}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => void goToHistoryPage(historyPage - 1)}
+              disabled={historyLoading || historyPage <= 1}
+              className="px-3 py-1.5 border border-border rounded text-text-secondary hover:bg-surface-hover disabled:opacity-50 text-sm"
+            >
+              Previous
+            </button>
+            <span className="text-xs text-text-secondary min-w-[80px] text-center">Page {historyPage} / {totalHistoryPages}</span>
+            <button
+              onClick={() => void goToHistoryPage(historyPage + 1)}
+              disabled={historyLoading || historyPage >= totalHistoryPages}
+              className="px-3 py-1.5 border border-border rounded text-text-secondary hover:bg-surface-hover disabled:opacity-50 text-sm"
+            >
+              Next
+            </button>
+          </div>
         </div>
       </section>
     </div>

@@ -330,9 +330,13 @@ router.get('/auto/status', requirePermission('settings.backup'), (_req: Request,
 // GET /auto/history — latest run history
 router.get('/auto/history', requirePermission('settings.backup'), (req: Request, res: Response) => {
   const limit = parseInt(String(req.query.limit ?? '50'), 10);
+  const page = parseInt(String(req.query.page ?? '1'), 10);
   try {
-    const rows = listAutoBackupHistory(Number.isFinite(limit) ? limit : 50);
-    res.json({ rows });
+    const data = listAutoBackupHistory(
+      Number.isFinite(limit) ? limit : 50,
+      Number.isFinite(page) ? page : 1,
+    );
+    res.json(data);
   } catch (e) {
     res.status(500).json({ error: `Failed to get history: ${(e as Error).message}` });
   }

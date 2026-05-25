@@ -991,9 +991,20 @@ export function getAutoBackupStatus(): {
   };
 }
 
-export function listAutoBackupHistory(limit: number): AutoBackupHistoryRow[] {
+export function listAutoBackupHistory(limit: number, page: number): {
+  rows: AutoBackupHistoryRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+} {
   const safeLimit = Math.max(1, Math.min(500, Math.floor(limit || 50)));
-  return queryAll<AutoBackupHistoryRow>(
+  const safePage = Math.max(1, Math.floor(page || 1));
+  const offset = (safePage - 1) * safeLimit;
+
+  const totalRow = queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM auto_backup_history');
+  const total = Number(totalRow?.count ?? 0);
+
+  const rows = queryAll<AutoBackupHistoryRow>(
     `SELECT
       id,
       trigger_type,
@@ -1009,7 +1020,14 @@ export function listAutoBackupHistory(limit: number): AutoBackupHistoryRow[] {
       error_message
      FROM auto_backup_history
      ORDER BY started_at DESC
-     LIMIT ?`,
-    [safeLimit],
+     LIMIT ? OFFSET ?`,
+    [safeLimit, offset],
   );
+
+  return {
+    rows,
+    total,
+    page: safePage,
+    pageSize: safeLimit,
+  };
 }
