@@ -27,7 +27,7 @@
     "ldapts": "^8.1.7",
     "ssh2": "^1.17.0",
     "uuid": "^14.0.0",
-    "ws": "^8.20.0"
+    "ws": "^8.20.1"
   },
   "devDependencies": {
     "@types/nodemailer": "^8.0.0",
