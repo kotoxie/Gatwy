@@ -8,6 +8,7 @@ import { logAudit } from '../services/audit.js';
 import { getSetting } from '../services/settings.js';
 import { config } from '../config.js';
 import { decryptRecording, encryptRecordingFileInPlace, openRdpRecordingFile, type RdpRecordingWriter } from '../services/encryption.js';
+import { resolveClientIp } from '../services/ip.js';
 
 const router = Router();
 router.use(authRequired);
@@ -198,6 +199,30 @@ router.post('/rdp-session', (req: Request, res: Response) => {
     [sessionId, userId, connectionId, 'rdp'],
   );
   res.json({ sessionId, shouldRecord: true });
+});
+
+// POST /rdp-file-transfer — audit log an RDP file transfer event (client-side CLIPRDR)
+router.post('/rdp-file-transfer', (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const { connectionId, fileName, fileSize, direction } = req.body as {
+    connectionId?: string;
+    fileName?: string;
+    fileSize?: number;
+    direction?: 'upload' | 'download';
+  };
+  if (!connectionId || !fileName || !direction) {
+    res.status(400).json({ error: 'connectionId, fileName, and direction are required' });
+    return;
+  }
+
+  logAudit({
+    userId,
+    eventType: `session.rdp.file_${direction}`,
+    target: connectionId,
+    details: { fileName, fileSize: fileSize ?? 0, direction },
+    ipAddress: resolveClientIp(req),
+  });
+  res.json({ ok: true });
 });
 
 // POST /:id/recording/chunk — append a binary WebM chunk to the recording file

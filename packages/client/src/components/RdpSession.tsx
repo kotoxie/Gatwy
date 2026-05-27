@@ -4,11 +4,14 @@ import { getWsTicket } from '../lib/wsTicket';
 import { DisconnectOverlay } from './DisconnectOverlay';
 import { RdpMobileKeyboard } from './RdpMobileKeyboard';
 import { RdpClipboardService } from '../services/rdpClipboard';
+import { RdpFileTransfer } from './RdpFileTransfer';
 
 let rdpInitialized = false;
 let Backend: Record<string, unknown> | null = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let displayControl: ((enable: boolean) => any) | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let RdpFileTransferProviderClass: (new (options?: any) => any) | null = null;
 
 async function initRdp() {
   if (rdpInitialized) return;
@@ -16,6 +19,8 @@ async function initRdp() {
   await rdpModule.init('info');
   Backend = rdpModule.Backend as Record<string, unknown>;
   displayControl = rdpModule.displayControl;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  RdpFileTransferProviderClass = (rdpModule as any).RdpFileTransferProvider ?? null;
   rdpInitialized = true;
 }
 
@@ -89,6 +94,9 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
   const [reconnectCount, setReconnectCount] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [fileTransferOpen, setFileTransferOpen] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [fileTransferProvider, setFileTransferProvider] = useState<any>(null);
   const autoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Fullscreen + Keyboard Lock ─────────────────────────────────────────────
@@ -253,6 +261,18 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         const clipboardService = new RdpClipboardService({ ClipboardData });
         await clipboardService.init();
 
+        // ── File Transfer Provider ───────────────────────────────────────────
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let ftProvider: any = null;
+        if (RdpFileTransferProviderClass) {
+          ftProvider = new RdpFileTransferProviderClass({
+            chunkSize: 64 * 1024,
+            onUploadStarted: () => clipboardService.suppressMonitoring(),
+            onUploadFinished: () => clipboardService.resumeMonitoring(),
+          });
+          setFileTransferProvider(ftProvider);
+        }
+
         // ── Software cursor state (for recording compositing) ────────────────
         // The CSS cursor is a hardware overlay and never appears in captureStream.
         // IronRDP provides the cursor as a data URL via setCursorStyleCallback;
@@ -318,7 +338,7 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         };
         canvas.addEventListener('mousemove', onRecMouseMove);
 
-        const session = await new SessionBuilder()
+        const builder = new SessionBuilder()
           .username(sessionInfo.username)
           .password(sessionInfo.password)
           .destination(`${sessionInfo.host}:${sessionInfo.port}`)
@@ -353,8 +373,17 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
           )
           .remoteClipboardChangedCallback(clipboardService.onRemoteClipboardChanged)
           .forceClipboardUpdateCallback(clipboardService.onForceClipboardUpdate)
-          .extension(displayControl!(true))
-          .connect();
+          .extension(displayControl!(true));
+
+        // Register file transfer extensions on the builder
+        if (ftProvider) {
+          const ftExtensions = ftProvider.getBuilderExtensions();
+          for (const ext of ftExtensions) {
+            builder.extension(ext);
+          }
+        }
+
+        const session = await builder.connect();
 
         if (cancelled) {
           session.shutdown();
@@ -606,6 +635,11 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         clipboardService.setSession(session);
         clipboardService.startMonitoring();
 
+        // Wire file transfer provider session
+        if (ftProvider) {
+          ftProvider.setSession(session);
+        }
+
         canvas.addEventListener('mousemove', onMouseMove);
         canvas.addEventListener('mousedown', onMouseDown);
         canvas.addEventListener('mouseup', onMouseUp);
@@ -619,6 +653,8 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         await session.run();
 
         clipboardService.dispose();
+        if (ftProvider?.dispose) ftProvider.dispose();
+        setFileTransferProvider(null);
         resizeObserver?.disconnect();
         if (resizeTimer) clearTimeout(resizeTimer);
         canvas.removeEventListener('mousemove', onMouseMove);
@@ -812,7 +848,30 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
             Enter fullscreen to capture Ctrl+Tab, F-keys and other browser shortcuts.
           </p>
         )}
+
+        {/* File Transfer */}
+        {fileTransferProvider && (
+          <button
+            onClick={() => { setFileTransferOpen(o => !o); setPanelOpen(false); }}
+            className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-surface-hover text-text-primary text-sm transition-colors text-left w-full"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            File Transfer
+          </button>
+        )}
       </div>
+
+      {/* File Transfer Panel */}
+      <RdpFileTransfer
+        provider={fileTransferProvider}
+        visible={fileTransferOpen}
+        connectionId={tab.connectionId}
+        onClose={() => setFileTransferOpen(false)}
+      />
     </div>
   );
 }
