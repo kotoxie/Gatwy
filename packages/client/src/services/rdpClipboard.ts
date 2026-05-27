@@ -158,8 +158,9 @@ export class RdpClipboardService {
       const value = item.value();
 
       if (mime.startsWith('text/') && typeof value === 'string') {
-        record[mime] = new Blob([value], { type: mime });
-        cacheRecord[mime] = value;
+        const decoded = this.decodeCfHtmlBlob(value) ?? value;
+        record[mime] = new Blob([decoded], { type: mime });
+        cacheRecord[mime] = decoded;
       } else if (mime.startsWith('image/') && value instanceof Uint8Array) {
         record[mime] = new Blob([value as BlobPart], { type: mime });
         cacheRecord[mime] = value;
@@ -192,12 +193,41 @@ export class RdpClipboardService {
       if (mime.startsWith('text/')) {
         const value = item.value();
         if (typeof value === 'string' && value.length > 0) {
-          this.lastReceivedClipboardData = { [mime]: value };
-          navigator.clipboard.writeText(value).catch(() => {});
+          const decoded = this.decodeCfHtmlBlob(value) ?? value;
+          this.lastReceivedClipboardData = { [mime]: decoded };
+          navigator.clipboard.writeText(decoded).catch(() => {});
           return;
         }
       }
     }
+  }
+
+  /**
+   * Windows CF_HTML clipboard format arrives via IronRDP under text/plain MIME
+   * with UTF-8 bytes packed into UTF-16 code units (low byte first, high byte
+   * second). The first char of a CF_HTML blob is always U+6556 ("Ve" of
+   * "Version:"). This decodes it back to plain text, extracting the inner
+   * fragment content.
+   */
+  private decodeCfHtmlBlob(s: string): string | null {
+    if (s.charCodeAt(0) !== 0x6556) return null;
+    const bytes: number[] = [];
+    for (let i = 0; i < s.length; i++) {
+      const cp = s.charCodeAt(i);
+      bytes.push(cp & 0xff);
+      bytes.push((cp >> 8) & 0xff);
+    }
+    let end = bytes.length;
+    while (end > 0 && bytes[end - 1] === 0) end--;
+    const decoded = new TextDecoder('utf-8').decode(new Uint8Array(bytes.slice(0, end)));
+    const fragMatch = decoded.match(/<!--StartFragment-->([\s\S]*?)<!--EndFragment-->/);
+    const html = fragMatch
+      ? fragMatch[1]
+      : decoded.replace(/^Version:[\s\S]*?<body[^>]*>/i, '').replace(/<\/body[\s\S]*$/i, '');
+    // If the fragment is a single anchor, prefer the href
+    const hrefMatch = html.match(/<a\s[^>]*href="([^"]+)"[^>]*>/i);
+    if (hrefMatch) return hrefMatch[1].trim() || null;
+    return html.replace(/<[^>]+>/g, '').trim() || null;
   }
 
   private scheduleMonitor(): void {
