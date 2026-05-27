@@ -1,4 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useImperativeHandle, forwardRef } from 'react';
+
+export interface RdpFileTransferHandle {
+  handleNativeDrop: (e: DragEvent) => Promise<void>;
+}
 
 interface FileInfo {
   name: string;
@@ -28,8 +32,13 @@ interface TransferItem {
   bytesTransferred: number;
   percentage: number;
   direction: 'download' | 'upload';
-  status: 'active' | 'complete' | 'error';
+  status: 'active' | 'pending' | 'complete' | 'error';
   errorMessage?: string;
+}
+
+function normalizePercentage(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value)));
 }
 
 interface RdpFileTransferProps {
@@ -55,14 +64,48 @@ function logFileTransfer(connectionId: string, fileName: string, fileSize: numbe
   }).catch(() => {});
 }
 
-export function RdpFileTransfer({ provider, visible, connectionId, onClose }: RdpFileTransferProps) {
+const INFO_TEXT = `
+**Uploading files to the remote desktop:**
+1. Drop files anywhere on the RDP session, or click "Browse Files" to select them.
+2. Files are queued — press Ctrl+V inside the remote desktop to start each batch.
+3. Multiple queued batches are automatically merged into one Ctrl+V paste.
+
+**Downloading files from the remote desktop:**
+1. Copy files inside the remote desktop (Ctrl+C).
+2. The files appear in the "Remote files available" list below.
+3. Click "Download All" — your browser may ask permission to download multiple files.
+`.trim();
+
+export const RdpFileTransfer = forwardRef<RdpFileTransferHandle, RdpFileTransferProps>(
+function RdpFileTransfer({ provider, visible, connectionId, onClose }: RdpFileTransferProps, ref) {
   const [transfers, setTransfers] = useState<TransferItem[]>([]);
   const [availableFiles, setAvailableFiles] = useState<FileInfo[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploadHint, setUploadHint] = useState('');
+  const [showInfo, setShowInfo] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
+  const queueUploadRef = useRef<((items: File[] | DroppedFileEntry[]) => void) | null>(null);
+  // Each entry is a flat batch waiting for the current one to finish
+  const uploadQueue = useRef<Array<Array<File | DroppedFileEntry>>>([]);
+  const uploadBusy = useRef(false);
+  // Counter for stable temporary IDs for pending items
+  const tempIdCounter = useRef(-1);
+
+  useImperativeHandle(ref, () => ({
+    handleNativeDrop: async (e: DragEvent) => {
+      if (!provider) return;
+      try {
+        const files = await provider.handleDrop(e);
+        if (files.length > 0 && queueUploadRef.current) queueUploadRef.current(files as DroppedFileEntry[]);
+      } catch {
+        setUploadHint('Drop upload failed. Try using Browse Files.');
+      }
+    },
+  }), [provider]);
 
   useEffect(() => {
+    uploadQueue.current = [];
+    uploadBusy.current = false;
     if (!provider) return;
 
     const onFilesAvailable = (files: FileInfo[]) => {
@@ -74,7 +117,7 @@ export function RdpFileTransfer({ provider, visible, connectionId, onClose }: Rd
         const existing = prev.find(t => t.transferId === progress.transferId);
         if (existing) {
           return prev.map(t => t.transferId === progress.transferId
-            ? { ...t, bytesTransferred: progress.bytesTransferred, percentage: progress.percentage }
+            ? { ...t, bytesTransferred: progress.bytesTransferred, percentage: normalizePercentage(progress.percentage) }
             : t);
         }
         return [...prev, {
@@ -82,7 +125,7 @@ export function RdpFileTransfer({ provider, visible, connectionId, onClose }: Rd
           fileName: progress.fileName,
           totalBytes: progress.totalBytes,
           bytesTransferred: progress.bytesTransferred,
-          percentage: progress.percentage,
+          percentage: normalizePercentage(progress.percentage),
           direction: 'download',
           status: 'active',
         }];
@@ -90,23 +133,11 @@ export function RdpFileTransfer({ provider, visible, connectionId, onClose }: Rd
     };
 
     const onUploadProgress = (progress: TransferProgress) => {
-      setTransfers(prev => {
-        const existing = prev.find(t => t.transferId === progress.transferId);
-        if (existing) {
-          return prev.map(t => t.transferId === progress.transferId
-            ? { ...t, bytesTransferred: progress.bytesTransferred, percentage: progress.percentage }
-            : t);
-        }
-        return [...prev, {
-          transferId: progress.transferId,
-          fileName: progress.fileName,
-          totalBytes: progress.totalBytes,
-          bytesTransferred: progress.bytesTransferred,
-          percentage: progress.percentage,
-          direction: 'upload',
-          status: 'active',
-        }];
-      });
+      setTransfers(prev => prev.map(t =>
+        t.transferId === progress.transferId
+          ? { ...t, status: 'active' as const, bytesTransferred: progress.bytesTransferred, percentage: normalizePercentage(progress.percentage) }
+          : t,
+      ));
     };
 
     const onDownloadComplete = (file: FileInfo, blob: Blob) => {
@@ -116,7 +147,6 @@ export function RdpFileTransfer({ provider, visible, connectionId, onClose }: Rd
           : t,
       ));
       logFileTransfer(connectionId, file.name, file.size, 'download');
-      // Auto-download the file
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -170,41 +200,91 @@ export function RdpFileTransfer({ provider, visible, connectionId, onClose }: Rd
 
   const queueUpload = useCallback((items: File[] | DroppedFileEntry[]) => {
     if (!provider || items.length === 0) return;
-    try {
-      const handle = provider.uploadFiles(items);
+
+    const isDropped = (arr: typeof items) =>
+      arr.length > 0 && typeof (arr[0] as DroppedFileEntry).file !== 'undefined';
+
+    const itemMeta = (item: File | DroppedFileEntry, idx: number, dropped: boolean) => ({
+      fileName: dropped
+        ? ((item as DroppedFileEntry).name ?? (item as DroppedFileEntry).file?.name ?? `file-${idx}`)
+        : (item as File).name,
+      totalBytes: dropped
+        ? ((item as DroppedFileEntry).size ?? (item as DroppedFileEntry).file?.size ?? 0)
+        : (item as File).size,
+    });
+
+    const drainNext = (batch: Array<File | DroppedFileEntry>) => {
+      uploadBusy.current = true;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const handle = provider.uploadFiles(batch as any);
+        const dropped = isDropped(batch as File[] | DroppedFileEntry[]);
+
+        setTransfers(prev => {
+          // Replace any 'pending' placeholders for files in this batch, then add real entries
+          const withoutPending = prev.filter(t => t.status !== 'pending' || t.direction !== 'upload');
+          const next = [...withoutPending];
+          for (const [fileIndex, transferId] of handle.transferIds as Map<number, number>) {
+            const item = batch[fileIndex];
+            if (!item) continue;
+            const { fileName, totalBytes } = itemMeta(item, fileIndex, dropped);
+            if (next.some(t => t.transferId === transferId)) continue;
+            next.push({ transferId, fileName, totalBytes, bytesTransferred: 0, percentage: 0, direction: 'upload', status: 'active' });
+          }
+          return next;
+        });
+
+        setUploadHint('Files queued. Paste in the remote desktop (Ctrl+V) to start upload.');
+        handle.completion.finally(() => {
+          // Merge ALL pending batches into one so the next Ctrl+V sends everything at once
+          const pending = uploadQueue.current.splice(0);
+          if (pending.length > 0) {
+            drainNext(pending.flat());
+          } else {
+            uploadBusy.current = false;
+            setUploadHint('');
+          }
+        });
+      } catch {
+        uploadBusy.current = false;
+        setUploadHint('Upload failed to queue. Try again.');
+      }
+    };
+
+    if (uploadBusy.current) {
+      // Buffer and show as 'pending' in the list
+      uploadQueue.current.push(items as Array<File | DroppedFileEntry>);
+      const dropped = isDropped(items);
       setTransfers(prev => {
         const next = [...prev];
-        const isDropped = typeof (items[0] as DroppedFileEntry).file !== 'undefined';
-        for (const [fileIndex, transferId] of handle.transferIds as Map<number, number>) {
-          const item = items[fileIndex];
-          if (!item) continue;
-          const fileName = isDropped
-            ? ((item as DroppedFileEntry).name ?? (item as DroppedFileEntry).file?.name ?? `file-${fileIndex}`)
-            : (item as File).name;
-          const totalBytes = isDropped
-            ? ((item as DroppedFileEntry).size ?? (item as DroppedFileEntry).file?.size ?? 0)
-            : (item as File).size;
-          if (next.some((t) => t.transferId === transferId)) continue;
-          next.push({
-            transferId,
-            fileName,
-            totalBytes,
-            bytesTransferred: 0,
-            percentage: 0,
-            direction: 'upload',
-            status: 'active',
-          });
-        }
+        (items as Array<File | DroppedFileEntry>).forEach((item, idx) => {
+          const { fileName, totalBytes } = itemMeta(item, idx, dropped);
+          const tempId = tempIdCounter.current--;
+          next.push({ transferId: tempId, fileName, totalBytes, bytesTransferred: 0, percentage: 0, direction: 'upload', status: 'pending' });
+        });
         return next;
       });
-      setUploadHint('Files queued. Paste in the remote desktop (Ctrl+V) to start upload.');
-      handle.completion.finally(() => {
-        setUploadHint('');
-      });
-    } catch {
-      setUploadHint('Upload failed to queue. Try again.');
+    } else {
+      drainNext(items as Array<File | DroppedFileEntry>);
     }
   }, [provider]);
+
+  // Keep ref in sync so useImperativeHandle can call the latest queueUpload without a dep cycle
+  queueUploadRef.current = queueUpload;
+
+  const clearQueue = useCallback(() => {
+    uploadQueue.current = [];
+    setTransfers(prev => prev.filter(t => t.status !== 'pending' && t.status !== 'active'));
+  }, []);
+
+  const clearTransfer = useCallback((transferId: number) => {
+    setTransfers(prev => prev.filter(t => t.transferId !== transferId));
+    if (transferId < 0) {
+      uploadQueue.current = uploadQueue.current.filter((_, batchIdx) => {
+        return true;
+      });
+    }
+  }, []);
 
   const handleUpload = useCallback(async () => {
     if (!provider) return;
@@ -242,21 +322,47 @@ export function RdpFileTransfer({ provider, visible, connectionId, onClose }: Rd
   }, []);
 
   const clearCompleted = useCallback(() => {
-    setTransfers(prev => prev.filter(t => t.status === 'active'));
+    setTransfers(prev => prev.filter(t => t.status === 'active' || t.status === 'pending'));
   }, []);
 
   if (!visible) return null;
 
-  const activeTransfers = transfers.filter(t => t.status === 'active');
-  const completedTransfers = transfers.filter(t => t.status !== 'active');
+  const activeTransfers = transfers.filter(t => t.status === 'active' || t.status === 'pending');
+  const completedTransfers = transfers.filter(t => t.status !== 'active' && t.status !== 'pending');
 
   return (
-    <div className="absolute right-2 top-2 z-50 w-80 max-h-96 overflow-y-auto bg-gray-900 border border-gray-700 rounded-lg shadow-xl text-sm">
+    <div className="absolute right-2 top-2 z-50 w-80 max-h-[32rem] overflow-y-auto bg-gray-900 border border-gray-700 rounded-lg shadow-xl text-sm">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700">
         <span className="font-medium text-white">File Transfer</span>
-        <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowInfo(v => !v)}
+            title="How to use file transfer"
+            className={`w-5 h-5 rounded-full border text-[11px] font-bold flex items-center justify-center transition-colors ${
+              showInfo ? 'border-blue-400 text-blue-400' : 'border-gray-500 text-gray-400 hover:border-gray-300 hover:text-gray-200'
+            }`}
+          >
+            i
+          </button>
+          <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
+        </div>
       </div>
+
+      {/* Info panel */}
+      {showInfo && (
+        <div className="mx-3 mt-2 p-3 bg-gray-800 rounded text-[11px] text-gray-300 leading-relaxed border border-gray-700">
+          {INFO_TEXT.split('\n').map((line, i) =>
+            line.startsWith('**') ? (
+              <p key={i} className="font-semibold text-white mt-2 first:mt-0">{line.replace(/\*\*/g, '')}</p>
+            ) : line.match(/^\d\./) ? (
+              <p key={i} className="ml-2 mt-0.5">{line}</p>
+            ) : (
+              <p key={i} className="mt-0.5">{line}</p>
+            )
+          )}
+        </div>
+      )}
 
       {/* Upload zone */}
       <div
@@ -285,12 +391,17 @@ export function RdpFileTransfer({ provider, visible, connectionId, onClose }: Rd
         <div className="mx-3 mt-2">
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs text-gray-400">Remote files available</span>
-            <button
-              onClick={handleDownloadAll}
-              className="text-xs px-2 py-0.5 bg-green-600 hover:bg-green-500 text-white rounded"
-            >
-              Download All
-            </button>
+            <div className="relative group">
+              <button
+                onClick={handleDownloadAll}
+                className="text-xs px-2 py-0.5 bg-green-600 hover:bg-green-500 text-white rounded"
+              >
+                Download All
+              </button>
+              <div className="hidden group-hover:block absolute right-0 bottom-full mb-1.5 w-56 bg-gray-800 border border-gray-600 rounded p-2 text-[11px] text-gray-300 leading-snug shadow-lg z-10 pointer-events-none">
+                Your browser may ask for permission to download multiple files — click <span className="text-white font-medium">Allow</span> when prompted in the address bar.
+              </div>
+            </div>
           </div>
           {availableFiles.map((f, i) => (
             <div key={i} className="flex items-center justify-between py-0.5 text-xs text-gray-300">
@@ -301,22 +412,37 @@ export function RdpFileTransfer({ provider, visible, connectionId, onClose }: Rd
         </div>
       )}
 
-      {/* Active transfers */}
+      {/* Active / pending transfers */}
       {activeTransfers.length > 0 && (
         <div className="mx-3 mt-2">
-          <span className="text-xs text-gray-400">Active transfers</span>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs text-gray-400">Active transfers</span>
+            <button onClick={clearQueue} className="text-xs text-gray-500 hover:text-red-400 transition-colors">
+              Clear all
+            </button>
+          </div>
           {activeTransfers.map(t => (
             <div key={t.transferId} className="mt-1">
               <div className="flex items-center justify-between text-xs">
                 <span className="truncate flex-1 text-gray-300">
                   {t.direction === 'upload' ? '↑' : '↓'} {t.fileName}
+                  {t.status === 'pending' && <span className="ml-1 text-gray-500 italic">(queued)</span>}
                 </span>
-                <span className="text-gray-500 ml-1">{t.percentage}%</span>
+                <div className="flex items-center gap-1 ml-1 shrink-0">
+                  <span className="text-gray-500">{t.percentage}%</span>
+                  <button
+                    onClick={() => clearTransfer(t.transferId)}
+                    className="text-gray-600 hover:text-red-400 text-[10px] leading-none"
+                    title="Remove from list"
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
               <div className="w-full h-1 bg-gray-700 rounded mt-0.5">
                 <div
                   className={`h-full rounded transition-all ${
-                    t.direction === 'upload' ? 'bg-blue-500' : 'bg-green-500'
+                    t.status === 'pending' ? 'bg-gray-600' : t.direction === 'upload' ? 'bg-blue-500' : 'bg-green-500'
                   }`}
                   style={{ width: `${t.percentage}%` }}
                 />
@@ -355,4 +481,4 @@ export function RdpFileTransfer({ provider, visible, connectionId, onClose }: Rd
       )}
     </div>
   );
-}
+});

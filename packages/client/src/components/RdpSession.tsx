@@ -4,12 +4,14 @@ import { getWsTicket } from '../lib/wsTicket';
 import { DisconnectOverlay } from './DisconnectOverlay';
 import { RdpMobileKeyboard } from './RdpMobileKeyboard';
 import { RdpClipboardService } from '../services/rdpClipboard';
-import { RdpFileTransfer } from './RdpFileTransfer';
+import { RdpFileTransfer, RdpFileTransferHandle } from './RdpFileTransfer';
 
 let rdpInitialized = false;
 let Backend: Record<string, unknown> | null = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let displayControl: ((enable: boolean) => any) | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let enableCredssp: ((enable: boolean) => any) | null = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let RdpFileTransferProviderClass: (new (options?: any) => any) | null = null;
 
@@ -19,6 +21,7 @@ async function initRdp() {
   await rdpModule.init('info');
   Backend = rdpModule.Backend as Record<string, unknown>;
   displayControl = rdpModule.displayControl;
+  enableCredssp = rdpModule.enableCredssp;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   RdpFileTransferProviderClass = (rdpModule as any).RdpFileTransferProvider ?? null;
   rdpInitialized = true;
@@ -95,9 +98,16 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [fileTransferOpen, setFileTransferOpen] = useState(false);
+  const [showFileTransferNewBadge, setShowFileTransferNewBadge] = useState(false);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [fileTransferProvider, setFileTransferProvider] = useState<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fileTransferProviderRef = useRef<any>(null);
+  const fileTransferRef = useRef<RdpFileTransferHandle>(null);
   const autoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const disableDisplayControlRef = useRef(false);
+  const disableCredsspRef = useRef(false);
 
   // ── Fullscreen + Keyboard Lock ─────────────────────────────────────────────
   const toggleFullscreen = useCallback(() => {
@@ -144,16 +154,25 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
   useEffect(() => {
     if (status === 'Connected') {
       setPanelOpen(true);
+      setShowFileTransferNewBadge(true);
       if (autoCloseTimer.current) clearTimeout(autoCloseTimer.current);
       autoCloseTimer.current = setTimeout(() => setPanelOpen(false), 3000);
+    } else {
+      setShowFileTransferNewBadge(false);
     }
     return () => {
       if (autoCloseTimer.current) clearTimeout(autoCloseTimer.current);
     };
   }, [status]);
 
+  useEffect(() => {
+    if (fileTransferOpen) setShowFileTransferNewBadge(false);
+  }, [fileTransferOpen]);
+
   // ── Reconnect handler ──────────────────────────────────────────────────────
   const handleReconnect = useCallback(() => {
+    disableDisplayControlRef.current = false;
+    disableCredsspRef.current = false;
     setDisconnected(false);
     setDisconnectMessage('');
     setStatus('Initializing...');
@@ -271,6 +290,7 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
             onUploadFinished: () => clipboardService.resumeMonitoring(),
           });
           setFileTransferProvider(ftProvider);
+          fileTransferProviderRef.current = ftProvider;
         }
 
         // ── Software cursor state (for recording compositing) ────────────────
@@ -372,8 +392,15 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
             },
           )
           .remoteClipboardChangedCallback(clipboardService.onRemoteClipboardChanged)
-          .forceClipboardUpdateCallback(clipboardService.onForceClipboardUpdate)
-          .extension(displayControl!(true));
+          .forceClipboardUpdateCallback(clipboardService.onForceClipboardUpdate);
+
+        if (!disableDisplayControlRef.current) {
+          builder.extension(displayControl!(true));
+        }
+
+        if (enableCredssp) {
+          builder.extension(enableCredssp(!disableCredsspRef.current));
+        }
 
         // Register file transfer extensions on the builder
         if (ftProvider) {
@@ -630,6 +657,31 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
 
         const onBlur = () => session.releaseAllInputs();
         const onContextMenu = (e: Event) => e.preventDefault();
+        const isFileDrag = (e: DragEvent) =>
+          !!e.dataTransfer?.types && Array.from(e.dataTransfer.types).includes('Files');
+
+        const onFileDragEnter = (e: DragEvent) => {
+          if (!isFileDrag(e) || !fileTransferProviderRef.current) return;
+          e.preventDefault();
+          setIsDraggingFiles(true);
+        };
+        const onFileDragOver = (e: DragEvent) => {
+          if (!isFileDrag(e) || !fileTransferProviderRef.current) return;
+          e.preventDefault();
+          setIsDraggingFiles(true);
+        };
+        const onFileDragLeave = (e: DragEvent) => {
+          // Only clear when leaving the viewport entirely
+          if (e.relatedTarget == null) setIsDraggingFiles(false);
+        };
+        const onFileDrop = async (e: DragEvent) => {
+          if (!isFileDrag(e) || !fileTransferProviderRef.current) return;
+          e.preventDefault();
+          setIsDraggingFiles(false);
+          setFileTransferOpen(true);
+          setShowFileTransferNewBadge(false);
+          await fileTransferRef.current?.handleNativeDrop(e);
+        };
 
         // Start clipboard monitoring now that session is ready
         clipboardService.setSession(session);
@@ -649,12 +701,17 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         window.addEventListener('keydown', onKey, true);
         window.addEventListener('keyup', onKey, true);
         window.addEventListener('blur', onBlur, false);
+        window.addEventListener('dragenter', onFileDragEnter, false);
+        window.addEventListener('dragover', onFileDragOver, false);
+        window.addEventListener('dragleave', onFileDragLeave, false);
+        window.addEventListener('drop', onFileDrop, false);
 
         await session.run();
 
         clipboardService.dispose();
         if (ftProvider?.dispose) ftProvider.dispose();
         setFileTransferProvider(null);
+        fileTransferProviderRef.current = null;
         resizeObserver?.disconnect();
         if (resizeTimer) clearTimeout(resizeTimer);
         canvas.removeEventListener('mousemove', onMouseMove);
@@ -665,6 +722,10 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         window.removeEventListener('keydown', onKey, true);
         window.removeEventListener('keyup', onKey, true);
         window.removeEventListener('blur', onBlur);
+        window.removeEventListener('dragenter', onFileDragEnter);
+        window.removeEventListener('dragover', onFileDragOver);
+        window.removeEventListener('dragleave', onFileDragLeave);
+        window.removeEventListener('drop', onFileDrop);
 
         if (!cancelled) showDisconnect('The remote session has ended.');
       } catch (err) {
@@ -696,6 +757,15 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
               msg = 'Could not reach the remote host. Check that the hostname and port are correct and the server is online.';
             } else if (kindNum === 6 /* NegotiationFailure */) {
               msg = 'Protocol negotiation failed — the remote host may not support the required security level.';
+            } else if (kindNum === 0 && backtrace && backtrace.includes('invalid state') && !disableDisplayControlRef.current) {
+              // GNOME Remote Desktop and some non-Windows RDP servers don't support
+              // the Display Control virtual channel (RDPEDISP) or NLA/CredSSP.
+              // Silently retry without both to maximise compatibility.
+              disableDisplayControlRef.current = true;
+              disableCredsspRef.current = true;
+              setStatus('Retrying in compatibility mode...');
+              setReconnectCount((n) => n + 1);
+              return;
             } else {
               msg = `Connection error [${kindName}]${backtrace ? ': ' + backtrace : ''}`;
             }
@@ -757,7 +827,19 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
 
   return (
     <div ref={outerRef} className="absolute inset-0 flex flex-col bg-black overflow-hidden">
-      <div ref={containerRef} className="flex-1 w-full relative" />
+      <div ref={containerRef} className="flex-1 w-full relative">
+        {/* Drag-and-drop blur overlay — covers the full RDP canvas */}
+        {isDraggingFiles && (
+          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 backdrop-blur-sm bg-black/40 pointer-events-none">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            <span className="text-white text-lg font-semibold drop-shadow">Drop files to upload</span>
+          </div>
+        )}
+      </div>
 
       {/* Mobile soft-keyboard FAB — touch devices only */}
       <RdpMobileKeyboard connected={status === 'Connected'} />
@@ -780,22 +862,24 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
       )}
 
       {/* Tab trigger — always visible on the right edge */}
-      <button
-        onClick={() => setPanelOpen((o) => !o)}
-        title="Session controls"
-        className="absolute right-0 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center justify-center gap-2 w-7 py-4 bg-black/60 hover:bg-black/80 text-gray-400 hover:text-white transition-colors rounded-l-md"
-        style={{ writingMode: 'vertical-rl' }}
-      >
-        <span
-          className={`w-2.5 h-2.5 rounded-full shrink-0 ${
-            disconnected ? 'bg-red-500' : status === 'Connected' ? 'bg-green-500' : 'bg-yellow-500'
-          }`}
-          style={{ writingMode: 'horizontal-tb' }}
-        />
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ writingMode: 'horizontal-tb' }} className={`transition-transform ${panelOpen ? 'rotate-180' : ''}`}>
-          <polyline points="15 18 9 12 15 6" />
-        </svg>
-      </button>
+      <div className="absolute right-0 top-1/2 -translate-y-1/2 z-30">
+        <button
+          onClick={() => setPanelOpen((o) => !o)}
+          title="Session controls"
+          className="flex flex-col items-center justify-center gap-2 w-7 py-4 bg-black/60 hover:bg-black/80 text-gray-400 hover:text-white transition-colors rounded-l-md"
+          style={{ writingMode: 'vertical-rl' }}
+        >
+          <span
+            className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+              disconnected ? 'bg-red-500' : status === 'Connected' ? 'bg-green-500' : 'bg-yellow-500'
+            }`}
+            style={{ writingMode: 'horizontal-tb' }}
+          />
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ writingMode: 'horizontal-tb' }} className={`transition-transform ${panelOpen ? 'rotate-180' : ''}`}>
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+      </div>
 
       {/* Flyout panel */}
       <div
@@ -852,7 +936,7 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         {/* File Transfer */}
         {fileTransferProvider && (
           <button
-            onClick={() => { setFileTransferOpen(o => !o); setPanelOpen(false); }}
+            onClick={() => { setFileTransferOpen(o => !o); setPanelOpen(false); setShowFileTransferNewBadge(false); }}
             className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-surface-hover text-text-primary text-sm transition-colors text-left w-full"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -861,12 +945,18 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
             File Transfer
+            {showFileTransferNewBadge && (
+              <span className="ml-auto animate-bounce bg-emerald-500 text-white text-xs font-bold rounded-full px-2.5 py-0.5 shadow-md">
+                NEW
+              </span>
+            )}
           </button>
         )}
       </div>
 
       {/* File Transfer Panel */}
       <RdpFileTransfer
+        ref={fileTransferRef}
         provider={fileTransferProvider}
         visible={fileTransferOpen}
         connectionId={tab.connectionId}
