@@ -6,6 +6,12 @@ interface FileInfo {
   lastModified?: number;
 }
 
+interface DroppedFileEntry {
+  file: File | null;
+  name: string;
+  size: number;
+}
+
 interface TransferProgress {
   transferId: number;
   fileIndex: number;
@@ -53,6 +59,7 @@ export function RdpFileTransfer({ provider, visible, connectionId, onClose }: Rd
   const [transfers, setTransfers] = useState<TransferItem[]>([]);
   const [availableFiles, setAvailableFiles] = useState<FileInfo[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [uploadHint, setUploadHint] = useState('');
   const dropRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -161,24 +168,66 @@ export function RdpFileTransfer({ provider, visible, connectionId, onClose }: Rd
     }
   }, [provider, availableFiles]);
 
-  const handleUpload = useCallback(async () => {
-    if (!provider) return;
-    const files = await provider.showFilePicker({ multiple: true });
-    if (files.length > 0) {
-      provider.uploadFiles(files);
+  const queueUpload = useCallback((items: File[] | DroppedFileEntry[]) => {
+    if (!provider || items.length === 0) return;
+    try {
+      const handle = provider.uploadFiles(items);
+      setTransfers(prev => {
+        const next = [...prev];
+        const isDropped = typeof (items[0] as DroppedFileEntry).file !== 'undefined';
+        for (const [fileIndex, transferId] of handle.transferIds as Map<number, number>) {
+          const item = items[fileIndex];
+          if (!item) continue;
+          const fileName = isDropped
+            ? ((item as DroppedFileEntry).name ?? (item as DroppedFileEntry).file?.name ?? `file-${fileIndex}`)
+            : (item as File).name;
+          const totalBytes = isDropped
+            ? ((item as DroppedFileEntry).size ?? (item as DroppedFileEntry).file?.size ?? 0)
+            : (item as File).size;
+          if (next.some((t) => t.transferId === transferId)) continue;
+          next.push({
+            transferId,
+            fileName,
+            totalBytes,
+            bytesTransferred: 0,
+            percentage: 0,
+            direction: 'upload',
+            status: 'active',
+          });
+        }
+        return next;
+      });
+      setUploadHint('Files queued. Paste in the remote desktop (Ctrl+V) to start upload.');
+      handle.completion.finally(() => {
+        setUploadHint('');
+      });
+    } catch {
+      setUploadHint('Upload failed to queue. Try again.');
     }
   }, [provider]);
+
+  const handleUpload = useCallback(async () => {
+    if (!provider) return;
+    try {
+      const files = await provider.showFilePicker({ multiple: true });
+      if (files.length > 0) queueUpload(files);
+    } catch {
+      setUploadHint('File picker was cancelled or blocked by the browser.');
+    }
+  }, [provider, queueUpload]);
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragOver(false);
     if (!provider) return;
-    const files = await provider.handleDrop(e.nativeEvent);
-    if (files.length > 0) {
-      provider.uploadFiles(files);
+    try {
+      const files = await provider.handleDrop(e.nativeEvent);
+      if (files.length > 0) queueUpload(files as DroppedFileEntry[]);
+    } catch {
+      setUploadHint('Drop upload failed. Try using Browse Files.');
     }
-  }, [provider]);
+  }, [provider, queueUpload]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -227,6 +276,9 @@ export function RdpFileTransfer({ provider, visible, connectionId, onClose }: Rd
           Browse Files
         </button>
       </div>
+      {uploadHint && (
+        <p className="mx-3 mt-2 text-[11px] text-yellow-300">{uploadHint}</p>
+      )}
 
       {/* Available files from remote */}
       {availableFiles.length > 0 && (
