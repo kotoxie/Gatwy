@@ -3,6 +3,7 @@ import type { Tab } from '../pages/MainLayout';
 import { getWsTicket } from '../lib/wsTicket';
 import { DisconnectOverlay } from './DisconnectOverlay';
 import { RdpMobileKeyboard } from './RdpMobileKeyboard';
+import { RdpClipboardService } from '../services/rdpClipboard';
 
 let rdpInitialized = false;
 let Backend: Record<string, unknown> | null = null;
@@ -248,15 +249,9 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { SessionBuilder, DesktopSize, ClipboardData } = Backend as any;
 
-        let localClipboardText = '';
-        // Tracks the last text we successfully pushed TO the guest to deduplicate
-        // proactive syncs. Only updated after the CLIPRDR handshake resolves.
-        let lastPushedToGuest = '';
-        // Guards only the proactive sync paths (click debounce, window focus)
-        // against concurrent CLIPRDR handshakes. forceClipboardUpdateCallback
-        // (Ctrl+V inside RDP) must NEVER be blocked by this flag — it is a
-        // required response to an IronRDP internal clipboard channel request.
-        let proactivePasteInFlight = false;
+        // ── Clipboard Service (replaces custom clipboard handling) ───────────
+        const clipboardService = new RdpClipboardService({ ClipboardData });
+        await clipboardService.init();
 
         // ── Software cursor state (for recording compositing) ────────────────
         // The CSS cursor is a hardware overlay and never appears in captureStream.
@@ -323,62 +318,6 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         };
         canvas.addEventListener('mousemove', onRecMouseMove);
 
-        const PASTE_TIMEOUT_MS = 3000;
-
-        // Direct paste — used by forceClipboardUpdateCallback (Ctrl+V inside RDP).
-        // Never guarded by the in-flight flag; IronRDP requires this to always respond.
-        const pasteToGuest = (text: string) => {
-          if (!sessionRef.current) return;
-          const data = new ClipboardData();
-          data.addText('text/plain', text);
-          (sessionRef.current.onClipboardPaste(data) as Promise<void>)
-            .then(() => { lastPushedToGuest = text; })
-            .catch(() => {});
-        };
-
-        // Proactive paste — used by click debounce and window-focus sync.
-        // Guarded against concurrency so simultaneous CB_FORMAT_LIST PDUs don't
-        // confuse the server-side CLIPRDR state machine.
-        const pushClipboardToGuest = (text: string) => {
-          if (!sessionRef.current) return;
-          if (proactivePasteInFlight) return;
-          proactivePasteInFlight = true;
-
-          const data = new ClipboardData();
-          data.addText('text/plain', text);
-
-          const pastePromise = sessionRef.current.onClipboardPaste(data) as Promise<void>;
-          const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('clipboard timeout')), PASTE_TIMEOUT_MS),
-          );
-
-          Promise.race([pastePromise, timeoutPromise])
-            .then(() => { lastPushedToGuest = text; })
-            .catch(() => {
-              // On timeout or error: reset so same text can be retried next click.
-              lastPushedToGuest = '';
-            })
-            .finally(() => { proactivePasteInFlight = false; });
-        };
-
-        const syncHostClipboardToGuest = () => {
-          navigator.clipboard.readText().then((text) => {
-            // Only deduplicate against what we last sent TO the guest,
-            // not against what came FROM the guest — prevents the round-trip block.
-            if (text && text !== lastPushedToGuest) {
-              localClipboardText = text;
-              pushClipboardToGuest(text);
-            }
-          }).catch(() => {
-            // clipboard.readText() fails when the document is not focused or
-            // clipboard-read permission is not granted. Fall back to sending the
-            // last known host clipboard text so Ctrl+V still works.
-            if (localClipboardText && localClipboardText !== lastPushedToGuest) {
-              pushClipboardToGuest(localClipboardText);
-            }
-          });
-        };
-
         const session = await new SessionBuilder()
           .username(sessionInfo.username)
           .password(sessionInfo.password)
@@ -412,83 +351,8 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
               }
             },
           )
-          .remoteClipboardChangedCallback((clipData: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
-            const items = (clipData.items() as any[]) ?? []; // eslint-disable-line @typescript-eslint/no-explicit-any
-
-            // IronRDP may report the Windows CF_HTML clipboard format under the
-            // text/plain MIME type. CF_HTML is a UTF-8 byte stream, but each pair
-            // of UTF-8 bytes gets packed into one UTF-16 code unit (low byte first,
-            // high byte second), producing garbled Unicode characters like 敖獲潩...
-            // instead of the plain text. The first char of a CF_HTML blob is always
-            // U+6556 (V=0x56 low, e=0x65 high → "Ve" of "Version:").
-            // We decode and unwrap it back to the inner plain text.
-            const decodeCfHtmlBlob = (s: string): string | null => {
-              if (s.charCodeAt(0) !== 0x6556) return null; // not a CF_HTML blob
-              const bytes: number[] = [];
-              for (let i = 0; i < s.length; i++) {
-                const cp = s.charCodeAt(i);
-                bytes.push(cp & 0xff);
-                bytes.push((cp >> 8) & 0xff);
-              }
-              let end = bytes.length;
-              while (end > 0 && bytes[end - 1] === 0) end--;
-              const decoded = new TextDecoder('utf-8').decode(new Uint8Array(bytes.slice(0, end)));
-              // Extract only the StartFragment..EndFragment section
-              const fragMatch = decoded.match(/<!--StartFragment-->([\s\S]*?)<!--EndFragment-->/);
-              const html = fragMatch
-                ? fragMatch[1]
-                : decoded.replace(/^Version:[\s\S]*?<body[^>]*>/i, '').replace(/<\/body[\s\S]*$/i, '');
-              // If the fragment is a single anchor, prefer the href over the link text
-              const hrefMatch = html.match(/<a\s[^>]*href="([^"]+)"[^>]*>/i);
-              if (hrefMatch) return hrefMatch[1].trim() || null;
-              return html.replace(/<[^>]+>/g, '').trim() || null;
-            };
-
-            // Priority order: prefer explicit unicode/plain text over HTML
-            const PRIORITY = ['text/unicode', 'text/plain;charset=utf-16', 'text/plain'];
-            const textItem = PRIORITY.reduce<any>( // eslint-disable-line @typescript-eslint/no-explicit-any
-              (found, mime) => found ?? items.find((i: any) => i.mimeType() === mime) ?? null, // eslint-disable-line @typescript-eslint/no-explicit-any
-              null,
-            );
-
-            if (textItem) {
-              const raw = String(textItem.value());
-              // Attempt to unwrap a mis-encoded CF_HTML blob first
-              const text = decodeCfHtmlBlob(raw) ?? raw;
-              if (text) {
-                localClipboardText = text;
-                navigator.clipboard.writeText(text).catch(() => {});
-              }
-              return;
-            }
-
-            // Fallback: explicit text/html item
-            const htmlItem = items.find((i: any) => // eslint-disable-line @typescript-eslint/no-explicit-any
-              i.mimeType() === 'text/html' || i.mimeType() === 'text/html;charset=utf-8',
-            );
-            if (htmlItem) {
-              const raw = String(htmlItem.value());
-              const text = decodeCfHtmlBlob(raw) ?? raw.replace(/<[^>]+>/g, '').trim();
-              if (text) {
-                localClipboardText = text;
-                navigator.clipboard.writeText(text).catch(() => {});
-              }
-            }
-          })
-          .forceClipboardUpdateCallback(() => {
-            // IronRDP fires this when the server sends CB_FORMAT_DATA_REQUEST (Ctrl+V in remote app).
-            // We MUST respond — use pasteToGuest which is never blocked by the in-flight guard.
-            // Prefer fresh browser clipboard; fall back to last known text if API is unavailable.
-            navigator.clipboard.readText().then((text) => {
-              const content = text || localClipboardText;
-              if (content) {
-                if (text) localClipboardText = text;
-                pasteToGuest(content);
-              }
-            }).catch(() => {
-              if (localClipboardText) pasteToGuest(localClipboardText);
-            });
-          })
+          .remoteClipboardChangedCallback(clipboardService.onRemoteClipboardChanged)
+          .forceClipboardUpdateCallback(clipboardService.onForceClipboardUpdate)
           .extension(displayControl!(true))
           .connect();
 
@@ -677,17 +541,6 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
           }
         };
 
-        // Debounce clipboard sync on click — re-sync on every left-click but no
-        // more than once per 600ms to avoid hammering the Clipboard API.
-        let lastClipboardSyncTime = 0;
-        const debouncedSyncHostClipboard = () => {
-          const now = Date.now();
-          if (now - lastClipboardSyncTime > 600) {
-            lastClipboardSyncTime = now;
-            syncHostClipboardToGuest();
-          }
-        };
-
         const onMouseDown = (e: MouseEvent) => {
           canvas.focus();
           e.preventDefault();
@@ -696,9 +549,6 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
           const colorTpl = RIPPLE_COLORS[e.button] ?? RIPPLE_COLORS[0];
           clickRipples.push({ x: recMouseX, y: recMouseY, t: performance.now(), color: colorTpl });
           pushEventRef.current?.('click');
-          // Sync on every click (debounced) — not just the first or right-click.
-          // This ensures clipboard stays fresh as the user navigates the remote desktop.
-          debouncedSyncHostClipboard();
         };
         const onMouseUp = (e: MouseEvent) => {
           e.preventDefault();
@@ -750,25 +600,11 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         };
 
         const onBlur = () => session.releaseAllInputs();
-        const onWindowFocus = () => syncHostClipboardToGuest();
         const onContextMenu = (e: Event) => e.preventDefault();
 
-        const onCopy = (e: ClipboardEvent) => {
-          if (localClipboardText) {
-            e.clipboardData?.setData('text/plain', localClipboardText);
-            e.preventDefault();
-          }
-        };
-
-        const onPaste = (e: ClipboardEvent) => {
-          const text = e.clipboardData?.getData('text/plain') ?? '';
-          if (text) {
-            localClipboardText = text;
-            // Reactive path — user explicitly pressed Ctrl+V in browser.
-            // Use pasteToGuest (unguarded) so it's never blocked by a proactive sync.
-            pasteToGuest(text);
-          }
-        };
+        // Start clipboard monitoring now that session is ready
+        clipboardService.setSession(session);
+        clipboardService.startMonitoring();
 
         canvas.addEventListener('mousemove', onMouseMove);
         canvas.addEventListener('mousedown', onMouseDown);
@@ -779,12 +615,10 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         window.addEventListener('keydown', onKey, true);
         window.addEventListener('keyup', onKey, true);
         window.addEventListener('blur', onBlur, false);
-        window.addEventListener('focus', onWindowFocus, false);
-        document.addEventListener('copy', onCopy, true);
-        window.addEventListener('paste', onPaste, false);
 
         await session.run();
 
+        clipboardService.dispose();
         resizeObserver?.disconnect();
         if (resizeTimer) clearTimeout(resizeTimer);
         canvas.removeEventListener('mousemove', onMouseMove);
@@ -795,9 +629,6 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         window.removeEventListener('keydown', onKey, true);
         window.removeEventListener('keyup', onKey, true);
         window.removeEventListener('blur', onBlur);
-        window.removeEventListener('focus', onWindowFocus);
-        document.removeEventListener('copy', onCopy, true);
-        window.removeEventListener('paste', onPaste);
 
         if (!cancelled) showDisconnect('The remote session has ended.');
       } catch (err) {
