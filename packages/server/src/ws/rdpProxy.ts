@@ -115,6 +115,65 @@ export function setupRdpProxy(server: https.Server): void {
    * Read one complete TPKT/X.224 PDU from a socket (length from bytes [2-3]).
    * Any leftover bytes are re-emitted as a 'data' event.
    */
+  /**
+   * Searches for the RDP Client Core Data (TS_UD_CS_CORE, type 0xC001) in a buffer
+   * and patches it to request a 32bpp session from xrdp.
+   *
+   * IronRDP's WASM is compiled with color_depth=16, so xrdp negotiates 16bpp and
+   * sends 16bpp legacy bitmaps. IronRDP's canvas renderer always assumes 32bpp input,
+   * so any other bpp causes a stride mismatch and display corruption:
+   *   16bpp → alternating-row pattern (stride ratio 1:2)
+   *   24bpp → diagonal shear pattern  (stride ratio 3:4)
+   *   32bpp → correct rendering
+   *
+   * The three fields required to signal 32bpp to xrdp (MS-RDPBCGR 2.2.1.3.2):
+   *   +140 highColorDepth (2)       24  — highest valid enum value for "high color"
+   *   +142 supportedColorDepths (2) |= 0x0008  — RNS_UD_32BPP_SUPPORT flag
+   *   +144 earlyCapabilityFlags (2) |= 0x0002  — RNS_UD_CS_WANT_32BPP_SESSION flag
+   *
+   * Returns a new Buffer if patched, or the same reference if CS_CORE was not found.
+   */
+  function patchHighColorDepth(buf: Buffer): Buffer {
+    // TS_UD_CS_CORE header: type = 0xC001 (LE bytes 0x01 0xC0)
+    //
+    // Scanner strategy:
+    //  1. Look for the 0x01 0xC0 type marker.
+    //  2. Verify SASSequence at body offset +10 (buffer i+14) == 0xAA03
+    //     (RNS_UD_SAS_DEL — every spec-compliant client sets this).
+    //     This reliably rejects accidental 0x01 0xC0 byte sequences that
+    //     appear in TPKT/X.224/MCS/GCC headers before the real CS_CORE.
+    //  3. Only patch when highColorDepth < 32 (i.e. xrdp would negotiate < 32bpp).
+    //
+    // Fix strategy — two independent paths both result in bpp=32 in xrdp:
+    //  a) highColorDepth = 32  →  xrdp: bpp = highColorDepth = 32  (direct assignment)
+    //  b) supportedColorDepths |= 0x0008 (RNS_UD_32BPP_SUPPORT)
+    //     + earlyCapabilityFlags |= 0x0002 (RNS_UD_CS_WANT_32BPP_SESSION)
+    //     →  xrdp: if (earlyCapabilityFlags & 0x0002) && (supportedColorDepths & 0x0008)
+    //              then bpp = 32
+    //
+    // CS_CORE field offsets relative to the 0x01 0xC0 marker at position i
+    // (all offsets include the 4-byte TS_UD_HEADER):
+    //   i+14  SASSequence        (2) must be 0xAA03
+    //   i+140 highColorDepth     (2) patch to 32
+    //   i+142 supportedColorDepths (2) set RNS_UD_32BPP_SUPPORT bit
+    //   i+144 earlyCapabilityFlags (2) set RNS_UD_CS_WANT_32BPP_SESSION bit
+    for (let i = 0; i < buf.length - 1; i++) {
+      if (buf[i] !== 0x01 || buf[i + 1] !== 0xC0) continue;
+      if (i + 4 > buf.length) continue;
+      const csLen = buf.readUInt16LE(i + 2);
+      if (csLen < 146 || i + csLen > buf.length) continue;
+      if (buf.readUInt16LE(i + 14) !== 0xAA03) continue;   // SASSequence must be RNS_UD_SAS_DEL
+      const highColor = buf.readUInt16LE(i + 140);
+      if (highColor >= 32) continue;                        // already 32bpp or more, no patch needed
+      const patched = Buffer.from(buf);
+      patched.writeUInt16LE(32, i + 140);                                        // highColorDepth = 32
+      patched.writeUInt16LE(patched.readUInt16LE(i + 142) | 0x0008, i + 142);   // RNS_UD_32BPP_SUPPORT
+      patched.writeUInt16LE(patched.readUInt16LE(i + 144) | 0x0002, i + 144);   // RNS_UD_CS_WANT_32BPP_SESSION
+      return patched;
+    }
+    return buf;
+  }
+
   function readX224Pdu(sock: net.Socket): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       let buf = Buffer.alloc(0);
@@ -242,9 +301,15 @@ export function setupRdpProxy(server: https.Server): void {
               if (ws.readyState === WebSocket.OPEN) ws.close(1000, 'TCP closed');
             });
 
-            // WebSocket → TLS
+            // WebSocket → TLS (patch Client Core Data bpp on the way through)
+            let colorDepthPatched = false;
             ws.on('message', (msg: Buffer | string) => {
-              const buf = Buffer.isBuffer(msg) ? msg : Buffer.from(msg as string);
+              let buf = Buffer.isBuffer(msg) ? msg : Buffer.from(msg as string);
+              if (!colorDepthPatched) {
+                const patched = patchHighColorDepth(buf);
+                if (patched !== buf) colorDepthPatched = true;
+                buf = patched;
+              }
               if (!t.destroyed && t.writable) t.write(buf);
             });
           });
