@@ -15,7 +15,7 @@
     "clean": "rm -rf packages/server/dist packages/client/dist"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1",
+    "concurrently": "^10.0.3",
     "typescript": "^6.0.2"
   }
 }
