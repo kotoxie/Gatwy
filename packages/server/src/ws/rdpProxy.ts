@@ -36,6 +36,7 @@ interface RedirectInfo {
 }
 
 const IO_CHANNEL_ID = 1003;
+const MCS_DISCONNECT_PROVIDER_ULTIMATUM = 0x08;
 const PDU_TYPE_DEMAND_ACTIVE = 0x1;
 const PDU_TYPE_DEACTIVATE_ALL = 0x6;
 const PDU_TYPE_SERVER_REDIRECTION = 0x0a;
@@ -267,6 +268,11 @@ export function setupRdpProxy(server: https.Server): void {
     return { channelId, userData: frame.subarray(off, off + userDataLen.value) };
   }
 
+  function isDisconnectProviderUltimatum(frame: Buffer): boolean {
+    if (frame.length < 8 || frame[0] !== 0x03 || frame[1] !== 0x00 || frame[5] !== 0xf0) return false;
+    return frame[7] === MCS_DISCONNECT_PROVIDER_ULTIMATUM;
+  }
+
   function parseShareControlHeader(userData: Buffer): { pduType: number; body: Buffer } | null {
     if (userData.length < 8) return null;
     const totalLength = userData.readUInt16LE(0);
@@ -424,9 +430,12 @@ export function setupRdpProxy(server: https.Server): void {
 
   function inspectServerPreActivationFrame(frame: Buffer, defaultPort: number):
     | { kind: 'other' }
+    | { kind: 'disconnect-provider-ultimatum' }
     | { kind: 'demand-active' }
     | { kind: 'deactivate-all' }
     | { kind: 'redirect'; redirect: RedirectInfo } {
+    if (isDisconnectProviderUltimatum(frame)) return { kind: 'disconnect-provider-ultimatum' };
+
     const indication = decodeSendDataIndication(frame);
     if (!indication || indication.channelId !== IO_CHANNEL_ID) return { kind: 'other' };
 
@@ -641,6 +650,7 @@ export function setupRdpProxy(server: https.Server): void {
                     return;
                   }
                   if (inspection.kind === 'deactivate-all') continue;
+                  if (inspection.kind === 'disconnect-provider-ultimatum') continue;
                   if (inspection.kind === 'demand-active') {
                     activationComplete = true;
                     bufferedClientFrames.length = 0;
