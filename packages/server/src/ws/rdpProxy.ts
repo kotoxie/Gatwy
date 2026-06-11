@@ -1,7 +1,7 @@
 import net from 'net';
 import tls from 'tls';
 import type { IncomingMessage } from 'http';
-import { WebSocketServer, WebSocket } from 'ws';
+import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import type https from 'https';
 import { isSessionRevoked } from '../services/loginSession.js';
 import { registerWs, unregisterWs } from './wsRegistry.js';
@@ -13,6 +13,7 @@ import { decrypt } from '../services/encryption.js';
 import { logAudit } from '../services/audit.js';
 import { resolveClientIp } from '../services/ip.js';
 import { v4 as uuid } from 'uuid';
+import { performCredSSP } from '../services/credssp.js';
 
 interface ConnectionRow {
   id: string;
@@ -24,6 +25,29 @@ interface ConnectionRow {
   name: string;
   skip_cert_validation: number;
 }
+
+interface RedirectInfo {
+  host: string;
+  port: number;
+  routingToken?: Buffer;
+  username?: string;
+  domain?: string;
+  password?: string;
+}
+
+const IO_CHANNEL_ID = 1003;
+const PDU_TYPE_DEMAND_ACTIVE = 0x1;
+const PDU_TYPE_DEACTIVATE_ALL = 0x6;
+const PDU_TYPE_SERVER_REDIRECTION = 0x0a;
+const SEC_REDIRECTION_PKT = 0x0400;
+const LB_TARGET_NET_ADDRESS = 0x00000001;
+const LB_LOAD_BALANCE_INFO = 0x00000002;
+const LB_USERNAME = 0x00000004;
+const LB_DOMAIN = 0x00000008;
+const LB_PASSWORD = 0x00000010;
+const LB_TARGET_FQDN = 0x00000100;
+const LB_TARGET_NETBIOS_NAME = 0x00000200;
+const LB_PASSWORD_IS_PK_ENCRYPTED = 0x00004000;
 
 export function setupRdpProxy(server: https.Server): void {
   const wssRaw = new WebSocketServer({ noServer: true });
@@ -92,7 +116,7 @@ export function setupRdpProxy(server: https.Server): void {
     throw new Error('Field [6] (x224_connection_pdu) not found');
   }
 
-  function encodeRDCleanPathResponse(x224cc: Buffer, serverAddr: string, certDers: Buffer[]): Buffer {
+  function encodeRDCleanPathResponse(x224cc: Buffer, serverAddr: string, certDers: Buffer[]): Uint8Array {
     const certContent = certDers.length > 0
       ? Buffer.concat(certDers.map(c => derOctet(c)))
       : Buffer.alloc(0);
@@ -104,7 +128,7 @@ export function setupRdpProxy(server: https.Server): void {
     ]));
   }
 
-  function encodeRDCleanPathError(): Buffer {
+  function encodeRDCleanPathError(): Uint8Array {
     return derSeq(Buffer.concat([
       derCtx(0, derInt(3390)),
       derCtx(1, derSeq(derCtx(0, derInt(1)))),
@@ -131,9 +155,10 @@ export function setupRdpProxy(server: https.Server): void {
    *   +142 supportedColorDepths (2) |= 0x0008  — RNS_UD_32BPP_SUPPORT flag
    *   +144 earlyCapabilityFlags (2) |= 0x0002  — RNS_UD_CS_WANT_32BPP_SESSION flag
    *
-   * Returns a new Buffer if patched, or the same reference if CS_CORE was not found.
+  * Returns the buffer to forward and whether a patch was applied.
    */
-  function patchHighColorDepth(buf: Buffer): Buffer {
+  function patchHighColorDepth(input: Uint8Array): { buffer: Buffer; patched: boolean } {
+    const buf = Buffer.from(input);
     // TS_UD_CS_CORE header: type = 0xC001 (LE bytes 0x01 0xC0)
     //
     // Scanner strategy:
@@ -169,16 +194,16 @@ export function setupRdpProxy(server: https.Server): void {
       patched.writeUInt16LE(32, i + 140);                                        // highColorDepth = 32
       patched.writeUInt16LE(patched.readUInt16LE(i + 142) | 0x0008, i + 142);   // RNS_UD_32BPP_SUPPORT
       patched.writeUInt16LE(patched.readUInt16LE(i + 144) | 0x0002, i + 144);   // RNS_UD_CS_WANT_32BPP_SESSION
-      return patched;
+      return { buffer: patched, patched: true };
     }
-    return buf;
+    return { buffer: Buffer.from(buf), patched: false };
   }
 
   function readX224Pdu(sock: net.Socket): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       let buf = Buffer.alloc(0);
-      const onData = (chunk: Buffer) => {
-        buf = Buffer.concat([buf, chunk]);
+      const onData = (chunk: Uint8Array) => {
+        buf = Buffer.concat([buf, Buffer.from(chunk)]);
         if (buf.length < 4) return;
         const total = (buf[2] << 8) | buf[3];
         if (buf.length < total) return;
@@ -196,6 +221,251 @@ export function setupRdpProxy(server: https.Server): void {
       sock.once('error', onErr);
       sock.once('close', onClose);
     });
+  }
+
+  function parseRdpNegBlock(x224: Buffer): { type: number; flags: number; length: number; value: number } | null {
+    if (x224.length < 8) return null;
+    const off = x224.length - 8;
+    const type = x224[off];
+    const flags = x224[off + 1];
+    const length = x224.readUInt16LE(off + 2);
+    if ((type !== 0x01 && type !== 0x02 && type !== 0x03) || length !== 8) return null;
+    return { type, flags, length, value: x224.readUInt32LE(off + 4) };
+  }
+
+  function getSelectedProtocol(x224cc: Buffer): number | null {
+    const neg = parseRdpNegBlock(x224cc);
+    return neg?.type === 0x02 ? neg.value : null;
+  }
+
+  function parsePerLength(buf: Buffer, off: number): { value: number; bytesRead: number } | null {
+    if (off >= buf.length) return null;
+    const first = buf[off];
+    if ((first & 0x80) === 0) return { value: first, bytesRead: 1 };
+    if (off + 1 >= buf.length) return null;
+    return { value: ((first & 0x7f) << 8) | buf[off + 1], bytesRead: 2 };
+  }
+
+  function decodeSendDataIndication(frame: Buffer): { channelId: number; userData: Buffer } | null {
+    if (frame.length < 8 || frame[0] !== 0x03 || frame[1] !== 0x00 || frame[5] !== 0xf0) return null;
+
+    let off = 7;
+    if (off >= frame.length || frame[off] !== 0x68) return null;
+    off += 1; // SendDataIndication choice
+
+    if (off + 5 > frame.length) return null;
+    off += 2; // initiator id
+    const channelId = (frame[off] << 8) | frame[off + 1];
+    off += 2;
+    off += 1; // dataPriority + segmentation
+
+    const userDataLen = parsePerLength(frame, off);
+    if (!userDataLen) return null;
+    off += userDataLen.bytesRead;
+    if (off + userDataLen.value > frame.length) return null;
+
+    return { channelId, userData: frame.subarray(off, off + userDataLen.value) };
+  }
+
+  function parseShareControlHeader(userData: Buffer): { pduType: number; body: Buffer } | null {
+    if (userData.length < 8) return null;
+    const totalLength = userData.readUInt16LE(0);
+    const pduType = userData.readUInt16LE(2) & 0x0f;
+    const bodyLength = Math.max(0, Math.min(totalLength, userData.length) - 8);
+    return { pduType, body: userData.subarray(8, 8 + bodyLength) };
+  }
+
+  function readLengthPrefixedData(buf: Buffer, off: number, end: number): { value: Buffer; next: number } | null {
+    if (off + 4 > end) return null;
+    const length = buf.readUInt32LE(off);
+    if (off + 4 + length > end) return null;
+    return { value: buf.subarray(off + 4, off + 4 + length), next: off + 4 + length };
+  }
+
+  function readLengthPrefixedUnicode(buf: Buffer, off: number, end: number): { value: string; next: number } | null {
+    const data = readLengthPrefixedData(buf, off, end);
+    if (!data) return null;
+    let bytes = data.value;
+    while (bytes.length >= 2 && bytes.readUInt16LE(bytes.length - 2) === 0) {
+      bytes = bytes.subarray(0, bytes.length - 2);
+    }
+    return { value: bytes.toString('utf16le'), next: data.next };
+  }
+
+  function splitTargetAddress(address: string, defaultPort: number): { host: string; port: number } {
+    const trimmed = address.trim();
+    if (trimmed.startsWith('[')) {
+      const end = trimmed.indexOf(']');
+      if (end > 0) {
+        const host = trimmed.slice(1, end);
+        const rawPort = trimmed.slice(end + 1).replace(/^:/, '');
+        const port = Number.parseInt(rawPort, 10);
+        return { host, port: Number.isFinite(port) ? port : defaultPort };
+      }
+    }
+
+    const firstColon = trimmed.indexOf(':');
+    const lastColon = trimmed.lastIndexOf(':');
+    if (firstColon > 0 && firstColon === lastColon) {
+      const host = trimmed.slice(0, lastColon);
+      const port = Number.parseInt(trimmed.slice(lastColon + 1), 10);
+      return { host, port: Number.isFinite(port) ? port : defaultPort };
+    }
+
+    return { host: trimmed, port: defaultPort };
+  }
+
+  function buildRoutingTokenLine(routingToken: Buffer): Buffer {
+    const prefix = Buffer.from('Cookie: msts=');
+    const crlf = Buffer.from('\r\n');
+
+    if (routingToken.subarray(0, prefix.length).equals(prefix) || routingToken.subarray(0, 4).equals(Buffer.from('tsv:'))) {
+      return routingToken.subarray(routingToken.length - 2).equals(crlf)
+        ? routingToken
+        : Buffer.concat([routingToken, crlf]);
+    }
+
+    return Buffer.concat([prefix, routingToken, crlf]);
+  }
+
+  function buildX224ConnectionRequest(baseRequest: Buffer, routingToken: Buffer): Buffer {
+    const nego = parseRdpNegBlock(baseRequest);
+    const head = nego ? baseRequest.subarray(0, baseRequest.length - 8) : baseRequest;
+    const tail = nego ? baseRequest.subarray(baseRequest.length - 8) : Buffer.alloc(0);
+    const rebuilt = Buffer.concat([head, buildRoutingTokenLine(routingToken), tail]);
+    const out = Buffer.from(rebuilt);
+    out.writeUInt16BE(out.length, 2);
+    out[4] = out.length - 5;
+    return out;
+  }
+
+  function parseServerRedirectionPacket(data: Buffer, defaultPort: number): RedirectInfo | null {
+    let off = 0;
+    if (data.length >= 14 && data.readUInt16LE(0) === 0x0000) off = 2;
+    if (data.length < off + 12) return null;
+
+    const flags = data.readUInt16LE(off);
+    if (flags !== SEC_REDIRECTION_PKT) return null;
+
+    const packetLength = data.readUInt16LE(off + 2);
+    const end = Math.min(data.length, off + packetLength);
+    const redirectionFlags = data.readUInt32LE(off + 8);
+    off += 12;
+
+    let targetAddress = '';
+    let targetFqdn = '';
+    let targetNetbios = '';
+    let username = '';
+    let domain = '';
+    let password = '';
+    let routingToken: Buffer | undefined;
+
+    if (redirectionFlags & LB_TARGET_NET_ADDRESS) {
+      const parsed = readLengthPrefixedUnicode(data, off, end);
+      if (!parsed) return null;
+      targetAddress = parsed.value;
+      off = parsed.next;
+    }
+    if (redirectionFlags & LB_LOAD_BALANCE_INFO) {
+      const parsed = readLengthPrefixedData(data, off, end);
+      if (!parsed) return null;
+      routingToken = Buffer.from(parsed.value);
+      off = parsed.next;
+    }
+    if (redirectionFlags & LB_USERNAME) {
+      const parsed = readLengthPrefixedUnicode(data, off, end);
+      if (!parsed) return null;
+      username = parsed.value;
+      off = parsed.next;
+    }
+    if (redirectionFlags & LB_DOMAIN) {
+      const parsed = readLengthPrefixedUnicode(data, off, end);
+      if (!parsed) return null;
+      domain = parsed.value;
+      off = parsed.next;
+    }
+    if (redirectionFlags & LB_PASSWORD) {
+      const parsed = readLengthPrefixedData(data, off, end);
+      if (!parsed) return null;
+      if ((redirectionFlags & LB_PASSWORD_IS_PK_ENCRYPTED) === 0) {
+        let bytes = parsed.value;
+        while (bytes.length >= 2 && bytes.readUInt16LE(bytes.length - 2) === 0) {
+          bytes = bytes.subarray(0, bytes.length - 2);
+        }
+        password = bytes.toString('utf16le');
+      }
+      off = parsed.next;
+    }
+    if (redirectionFlags & LB_TARGET_FQDN) {
+      const parsed = readLengthPrefixedUnicode(data, off, end);
+      if (!parsed) return null;
+      targetFqdn = parsed.value;
+      off = parsed.next;
+    }
+    if (redirectionFlags & LB_TARGET_NETBIOS_NAME) {
+      const parsed = readLengthPrefixedUnicode(data, off, end);
+      if (!parsed) return null;
+      targetNetbios = parsed.value;
+    }
+
+    const target = targetFqdn || targetAddress || targetNetbios;
+    const { host, port } = splitTargetAddress(target || '', defaultPort);
+    if (!host) return null;
+
+    return {
+      host,
+      port,
+      routingToken,
+      username: username || undefined,
+      domain: domain || undefined,
+      password: password || undefined,
+    };
+  }
+
+  function inspectServerPreActivationFrame(frame: Buffer, defaultPort: number):
+    | { kind: 'other' }
+    | { kind: 'demand-active' }
+    | { kind: 'deactivate-all' }
+    | { kind: 'redirect'; redirect: RedirectInfo } {
+    const indication = decodeSendDataIndication(frame);
+    if (!indication || indication.channelId !== IO_CHANNEL_ID) return { kind: 'other' };
+
+    const basicRedirection = parseServerRedirectionPacket(indication.userData, defaultPort);
+    if (basicRedirection) return { kind: 'redirect', redirect: basicRedirection };
+
+    const shareControl = parseShareControlHeader(indication.userData);
+    if (!shareControl) return { kind: 'other' };
+
+    if (shareControl.pduType === PDU_TYPE_DEACTIVATE_ALL) return { kind: 'deactivate-all' };
+    if (shareControl.pduType === PDU_TYPE_DEMAND_ACTIVE) return { kind: 'demand-active' };
+    if (shareControl.pduType === PDU_TYPE_SERVER_REDIRECTION) {
+      const redirect = parseServerRedirectionPacket(shareControl.body, defaultPort);
+      if (redirect) return { kind: 'redirect', redirect };
+    }
+
+    return { kind: 'other' };
+  }
+
+  function rawDataToBytes(data: RawData): Uint8Array {
+    if (typeof data === 'string') return Buffer.from(data);
+    if (Buffer.isBuffer(data)) return data;
+    if (Array.isArray(data)) {
+      const chunks = data.map((chunk) => new Uint8Array(chunk));
+      let total = 0;
+      for (const chunk of chunks) total += chunk.byteLength;
+      const merged = new Uint8Array(total);
+      let offset = 0;
+      for (const chunk of chunks) {
+        merged.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      return merged;
+    }
+    return new Uint8Array(data);
+  }
+
+  function sendBinary(ws: WebSocket, data: Uint8Array): void {
+    ws.send(data as RawData);
   }
 
   // ── RDCleanPath proxy for IronRDP ─────────────────────────────────────────────
@@ -238,106 +508,211 @@ export function setupRdpProxy(server: https.Server): void {
 
     let tunnel: net.Socket | null = null;
     let tlsTunnel: tls.TLSSocket | null = null;
+    let wsRelayHandler: ((msg: RawData) => void) | null = null;
+    let activationComplete = false;
+    let browserHandshakeSent = false;
+    let activeGeneration = 0;
+    let preActivationServerBuf = Buffer.alloc(0);
+    let colorDepthPatched = false;
+    let redirectCount = 0;
+    let closed = false;
+    let originalPassword = '';
+    const bufferedClientFrames: Buffer[] = [];
+
+    if (conn.encrypted_password) {
+      try { originalPassword = decrypt(conn.encrypted_password); } catch { /**/ }
+    }
+
     const cleanup = () => {
+      if (wsRelayHandler) {
+        ws.removeListener('message', wsRelayHandler);
+        wsRelayHandler = null;
+      }
       if (tlsTunnel) { try { tlsTunnel.destroy(); } catch { /**/ } tlsTunnel = null; }
       if (tunnel) { try { tunnel.destroy(); } catch { /**/ } tunnel = null; }
     };
 
     // First WebSocket message = RDCleanPath request DER
-    ws.once('message', (data: Buffer | string) => {
-      const rdcp = typeof data === 'string' ? Buffer.from(data) : (data as Buffer);
+    ws.once('message', (data: RawData) => {
+      const rdcp = Buffer.from(rawDataToBytes(data));
       let x224cr: Buffer;
       try { x224cr = extractX224CR(rdcp); }
       catch (e) {
         console.error('[rdp] parse error:', e);
-        if (ws.readyState === WebSocket.OPEN) { ws.send(encodeRDCleanPathError()); ws.close(4004, 'Bad PDU'); }
+        if (ws.readyState === WebSocket.OPEN) { sendBinary(ws, encodeRDCleanPathError()); ws.close(4004, 'Bad PDU'); }
         return;
       }
 
-      // Open TCP tunnel, do X.224 handshake, then upgrade to TLS.
-      // IronRDP sends raw CredSSP/RDP bytes through the WebSocket; the proxy
-      // wraps them in TLS when talking to the actual RDP host.  The server cert
-      // is captured from the TLS handshake and sent back in the RDCleanPath
-      // response so IronRDP can compute CredSSP channel bindings.
-      tunnel = net.connect(conn.port, conn.host, () => tunnel!.write(x224cr));
+      const formatUsername = (username: string, domain?: string) => {
+        if (!domain || username.includes('\\') || username.includes('@')) return username;
+        return `${domain}\\${username}`;
+      };
 
-      readX224Pdu(tunnel)
-        .then((x224cc) => {
-          if (ws.readyState !== WebSocket.OPEN) { cleanup(); return; }
+      const connectBackend = (redirect?: RedirectInfo) => {
+        if (redirect) redirectCount += 1;
+        const generation = ++activeGeneration;
+        preActivationServerBuf = Buffer.alloc(0);
 
-          // Upgrade the raw TCP socket to TLS (Node.js/OpenSSL acts as TLS client)
-          // skip_cert_validation is a per-connection toggle (C5 security fix — default: validate)
-          tlsTunnel = tls.connect({
-            socket: tunnel!,
-            rejectUnauthorized: conn.skip_cert_validation !== 1,
-            host: conn.host,
-            ...(conn.skip_cert_validation === 1 ? { checkServerIdentity: () => undefined } : {}),
-          });
+        if (tlsTunnel) { try { tlsTunnel.destroy(); } catch { /**/ } }
+        if (tunnel) { try { tunnel.destroy(); } catch { /**/ } }
+        tlsTunnel = null;
+        tunnel = null;
 
-          tlsTunnel.once('secureConnect', () => {
-            // Capture server cert chain for IronRDP's CredSSP channel bindings
-            const certs: Buffer[] = [];
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            let c: any = tlsTunnel!.getPeerCertificate(true);
-            const seen = new Set<string>();
-            while (c && c.raw) {
-              const key = (c.raw as Buffer).toString('hex');
-              if (seen.has(key)) break;
-              seen.add(key);
-              certs.push(Buffer.from(c.raw as Buffer));
-              c = c.issuerCertificate;
-            }
-            if (ws.readyState !== WebSocket.OPEN) { cleanup(); return; }
+        const targetHost = redirect?.host ?? conn.host;
+        const targetPort = redirect?.port ?? conn.port;
+        const x224Request = redirect?.routingToken ? buildX224ConnectionRequest(x224cr, redirect.routingToken) : x224cr;
 
-            ws.send(encodeRDCleanPathResponse(x224cc, conn.host, certs));
+        tunnel = net.connect(targetPort, targetHost, () => tunnel!.write(x224Request));
 
-            const t = tlsTunnel!;
+        readX224Pdu(tunnel)
+          .then((x224cc) => {
+            if (generation !== activeGeneration || ws.readyState !== WebSocket.OPEN) return;
 
-            // TLS → WebSocket
-            t.on('data', (chunk: Buffer) => {
-              if (ws.readyState === WebSocket.OPEN) ws.send(chunk);
-            });
-            t.once('close', () => {
-              if (ws.readyState === WebSocket.OPEN) ws.close(1000, 'TCP closed');
+            tlsTunnel = tls.connect({
+              socket: tunnel!,
+              rejectUnauthorized: conn.skip_cert_validation !== 1,
+              host: targetHost,
+              ...(conn.skip_cert_validation === 1 ? { checkServerIdentity: () => undefined } : {}),
             });
 
-            // WebSocket → TLS (patch Client Core Data bpp on the way through)
-            let colorDepthPatched = false;
-            ws.on('message', (msg: Buffer | string) => {
-              let buf = Buffer.isBuffer(msg) ? msg : Buffer.from(msg as string);
-              if (!colorDepthPatched) {
-                const patched = patchHighColorDepth(buf);
-                if (patched !== buf) colorDepthPatched = true;
-                buf = patched;
+            const currentTls = tlsTunnel;
+            currentTls.once('secureConnect', async () => {
+              if (generation !== activeGeneration || ws.readyState !== WebSocket.OPEN) return;
+
+              const certs: Buffer[] = [];
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              let c: any = currentTls.getPeerCertificate(true);
+              const seen = new Set<string>();
+              while (c && c.raw) {
+                const key = (c.raw as Buffer).toString('hex');
+                if (seen.has(key)) break;
+                seen.add(key);
+                certs.push(Buffer.from(c.raw as Buffer));
+                c = c.issuerCertificate;
               }
-              if (!t.destroyed && t.writable) t.write(buf);
-            });
-          });
 
-          tlsTunnel.once('error', (e: Error) => {
-            console.error('[rdp] TLS error:', e.message);
-            if (ws.readyState === WebSocket.OPEN) { ws.send(encodeRDCleanPathError()); ws.close(4003, 'TLS error'); }
+              if (!browserHandshakeSent) {
+                ws.send(encodeRDCleanPathResponse(x224cc, targetHost, certs));
+                browserHandshakeSent = true;
+              }
+
+              const selectedProtocol = getSelectedProtocol(x224cc);
+              const redirectUser = redirect?.username ?? conn.username ?? '';
+              const redirectPassword = redirect?.password ?? originalPassword;
+              if (redirect && selectedProtocol === 0x02 && redirectUser && redirectPassword) {
+                await performCredSSP(
+                  currentTls,
+                  formatUsername(redirectUser, redirect?.domain),
+                  redirectPassword,
+                  certs[0] ?? Buffer.alloc(0),
+                );
+              }
+
+              currentTls.on('data', (chunk: Uint8Array) => {
+                if (generation !== activeGeneration) return;
+
+                if (activationComplete) {
+                  if (ws.readyState === WebSocket.OPEN) ws.send(chunk);
+                  return;
+                }
+
+                preActivationServerBuf = Buffer.concat([preActivationServerBuf, chunk]);
+                while (preActivationServerBuf.length >= 4) {
+                  if (preActivationServerBuf[0] !== 0x03 || preActivationServerBuf[1] !== 0x00) {
+                    if (ws.readyState === WebSocket.OPEN) ws.send(preActivationServerBuf);
+                    preActivationServerBuf = Buffer.alloc(0);
+                    return;
+                  }
+
+                  const pduLen = preActivationServerBuf.readUInt16BE(2);
+                  if (preActivationServerBuf.length < pduLen) return;
+
+                  const frame = Buffer.from(preActivationServerBuf.subarray(0, pduLen));
+                  preActivationServerBuf = preActivationServerBuf.subarray(pduLen);
+
+                  const inspection = inspectServerPreActivationFrame(frame, targetPort);
+                  if (inspection.kind === 'redirect') {
+                    if (redirectCount >= 4) {
+                      if (ws.readyState === WebSocket.OPEN) ws.close(4003, 'Too many redirects');
+                      cleanup();
+                      return;
+                    }
+                    connectBackend(inspection.redirect);
+                    return;
+                  }
+                  if (inspection.kind === 'deactivate-all') continue;
+                  if (inspection.kind === 'demand-active') {
+                    activationComplete = true;
+                    bufferedClientFrames.length = 0;
+                  }
+
+                  if (ws.readyState === WebSocket.OPEN) ws.send(frame);
+                  if (activationComplete && preActivationServerBuf.length > 0) {
+                    ws.send(preActivationServerBuf);
+                    preActivationServerBuf = Buffer.alloc(0);
+                    return;
+                  }
+                }
+              });
+
+              currentTls.once('close', () => {
+                if (generation !== activeGeneration || closed) return;
+                if (ws.readyState === WebSocket.OPEN) ws.close(1000, 'TCP closed');
+              });
+
+              if (redirect && bufferedClientFrames.length > 0) {
+                for (const frame of bufferedClientFrames) {
+                  if (!currentTls.destroyed && currentTls.writable) currentTls.write(frame);
+                }
+              }
+            });
+
+            currentTls.once('error', (e: Error) => {
+              if (generation !== activeGeneration) return;
+              console.error('[rdp] TLS error:', e.message);
+              if (ws.readyState === WebSocket.OPEN) {
+                sendBinary(ws, encodeRDCleanPathError());
+                ws.close(4003, 'TLS error');
+              }
+              cleanup();
+            });
+          })
+          .catch((e) => {
+            if (generation !== activeGeneration) return;
+            console.error('[rdp] X.224 error:', e);
+            if (ws.readyState === WebSocket.OPEN) {
+              sendBinary(ws, encodeRDCleanPathError());
+              ws.close(4003, 'X.224 error');
+            }
             cleanup();
           });
-        })
-        .catch((e) => {
-          console.error('[rdp] X.224 error:', e);
-          if (ws.readyState === WebSocket.OPEN) { ws.send(encodeRDCleanPathError()); ws.close(4003, 'X.224 error'); }
+
+        tunnel.on('error', (err: Error) => {
+          if (generation !== activeGeneration) return;
+          console.error('[rdp] TCP error:', err.message);
+          if (ws.readyState === WebSocket.OPEN) ws.close(4003, 'TCP error');
           cleanup();
         });
+      };
 
-      tunnel.on('error', (err: Error) => {
-        console.error('[rdp] TCP error:', err.message);
-        if (ws.readyState === WebSocket.OPEN) ws.close(4003, 'TCP error');
-        cleanup();
-      });
-      // Only fire TCP close if TLS hasn't taken over yet
-      tunnel.on('close', () => {
-        if (!tlsTunnel && ws.readyState === WebSocket.OPEN) ws.close(1000, 'TCP closed');
-      });
+      wsRelayHandler = (msg: RawData) => {
+        const rawBytes = rawDataToBytes(msg);
+        let relayBytes: Uint8Array = rawBytes;
+        if (!colorDepthPatched) {
+          const patched = patchHighColorDepth(rawBytes);
+          if (patched.patched) colorDepthPatched = true;
+          relayBytes = patched.buffer;
+        }
+
+        if (!activationComplete) bufferedClientFrames.push(Buffer.from(relayBytes));
+        if (tlsTunnel && !tlsTunnel.destroyed && tlsTunnel.writable) tlsTunnel.write(relayBytes);
+      };
+      ws.on('message', wsRelayHandler);
+      connectBackend();
     });
 
     ws.on('close', () => {
+      closed = true;
       cleanup();
       // Mark the session as ended in the DB — covers the case where the browser
       // closes/crashes before the client can call /recording/finalize.

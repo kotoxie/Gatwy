@@ -76,6 +76,10 @@ const KEYBOARD_LOCK_KEYS = [
   'F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12',
 ];
 
+function isMidActivationRedirectError(backtrace: string) {
+  return backtrace.includes('unexpected Share Control Pdu (expected ServerDemandActive)');
+}
+
 interface RdpSessionProps {
   tab: Tab;
   onStatusChange: (tabId: string, status: Tab['status']) => void;
@@ -107,7 +111,6 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
   const fileTransferRef = useRef<RdpFileTransferHandle>(null);
   const autoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const disableDisplayControlRef = useRef(false);
-  const disableCredsspRef = useRef(false);
 
   // ── Fullscreen + Keyboard Lock ─────────────────────────────────────────────
   const toggleFullscreen = useCallback(() => {
@@ -172,7 +175,6 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
   // ── Reconnect handler ──────────────────────────────────────────────────────
   const handleReconnect = useCallback(() => {
     disableDisplayControlRef.current = false;
-    disableCredsspRef.current = false;
     setDisconnected(false);
     setDisconnectMessage('');
     setStatus('Initializing...');
@@ -399,7 +401,7 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         }
 
         if (enableCredssp) {
-          builder.extension(enableCredssp(!disableCredsspRef.current));
+          builder.extension(enableCredssp(true));
         }
 
         // Register file transfer extensions on the builder
@@ -757,12 +759,15 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
               msg = 'Could not reach the remote host. Check that the hostname and port are correct and the server is online.';
             } else if (kindNum === 6 /* NegotiationFailure */) {
               msg = 'Protocol negotiation failed — the remote host may not support the required security level.';
+            } else if (kindNum === 0 && backtrace && isMidActivationRedirectError(backtrace)) {
+              setStatus('Following remote desktop handoff...');
+              setReconnectCount((n) => n + 1);
+              return;
             } else if (kindNum === 0 && backtrace && backtrace.includes('invalid state') && !disableDisplayControlRef.current) {
-              // GNOME Remote Desktop and some non-Windows RDP servers don't support
-              // the Display Control virtual channel (RDPEDISP) or NLA/CredSSP.
-              // Silently retry without both to maximise compatibility.
+              // Some non-Windows RDP servers reject the Display Control channel.
+              // Retry without RDPEDISP, but keep CredSSP enabled because GNOME
+              // remote desktop requires NLA during its handoff flow.
               disableDisplayControlRef.current = true;
-              disableCredsspRef.current = true;
               setStatus('Retrying in compatibility mode...');
               setReconnectCount((n) => n + 1);
               return;

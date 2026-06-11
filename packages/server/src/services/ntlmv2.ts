@@ -9,15 +9,43 @@
 import crypto from 'node:crypto';
 
 // ─── NTLM flags ─────────────────────────────────────────────────────────────
-const F_UNICODE = 0x00000001; // NTLMSSP_NEGOTIATE_UNICODE
-const F_TARGET  = 0x00000004; // NTLMSSP_REQUEST_TARGET
-const F_NTLM    = 0x00000200; // NTLMSSP_NEGOTIATE_NTLM
-const F_SIGN    = 0x00008000; // NTLMSSP_NEGOTIATE_ALWAYS_SIGN
-const F_ESS     = 0x00080000; // NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY
-const F_128     = 0x20000000; // NTLMSSP_NEGOTIATE_128
+const F_UNICODE  = 0x00000001; // NTLMSSP_NEGOTIATE_UNICODE
+const F_TARGET   = 0x00000004; // NTLMSSP_REQUEST_TARGET
+const F_NTLM     = 0x00000200; // NTLMSSP_NEGOTIATE_NTLM
+const F_SIGN     = 0x00008000; // NTLMSSP_NEGOTIATE_ALWAYS_SIGN
+const F_ESS      = 0x00080000; // NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY
+const F_KEY_EXCH = 0x40000000; // NTLMSSP_NEGOTIATE_KEY_EXCH
+const F_128      = 0x20000000; // NTLMSSP_NEGOTIATE_128
 
-const NEGOTIATE_FLAGS = F_UNICODE | F_TARGET | F_NTLM | F_SIGN | F_ESS | F_128;
-const AUTH_FLAGS      = F_UNICODE | F_TARGET | F_NTLM | F_SIGN | F_ESS | F_128;
+const NEGOTIATE_FLAGS = F_UNICODE | F_TARGET | F_NTLM | F_SIGN | F_ESS | F_KEY_EXCH | F_128;
+const BASE_AUTH_FLAGS = F_UNICODE | F_TARGET | F_NTLM | F_SIGN | F_ESS | F_128;
+
+function rc4Encrypt(key: Buffer, data: Buffer): Buffer {
+  const state = new Uint8Array(256);
+  for (let idx = 0; idx < 256; idx++) state[idx] = idx;
+
+  let j = 0;
+  for (let idx = 0; idx < 256; idx++) {
+    j = (j + state[idx] + key[idx % key.length]) & 0xff;
+    const tmp = state[idx];
+    state[idx] = state[j];
+    state[j] = tmp;
+  }
+
+  let i = 0;
+  j = 0;
+  const out = Buffer.allocUnsafe(data.length);
+  for (let idx = 0; idx < data.length; idx++) {
+    i = (i + 1) & 0xff;
+    j = (j + state[i]) & 0xff;
+    const tmp = state[i];
+    state[i] = state[j];
+    state[j] = tmp;
+    out[idx] = data[idx] ^ state[(state[i] + state[j]) & 0xff];
+  }
+
+  return out;
+}
 
 const SIG = Buffer.from('4e544c4d5353500000000000', 'hex'); // "NTLMSSP\0"
 
@@ -86,17 +114,17 @@ function hmacMd5(key: Buffer, data: Buffer): Buffer {
 }
 
 // ─── Type 3: NTLMv2 Authenticate ─────────────────────────────────────────────
-export function encodeAuthenticate(
+export function encodeAuthenticateEx(
   username: string,
   domain: string,
   workstation: string,
   password: string,
   ch: NtlmChallenge,
-): Buffer {
+): { msg: Buffer; exportedSessionKey: Buffer } {
   // NT hash = MD4(UTF-16LE password)
   const ntHash   = md4(Buffer.from(password, 'utf16le'));
-  // NTLMv2 hash = HMAC-MD5(NT, UPPER(user)+UPPER(domain) as UTF-16LE)
-  const identity = Buffer.from((username.toUpperCase() + domain.toUpperCase()), 'utf16le');
+  // NTLMv2 hash = HMAC-MD5(NT, UPPER(user)+domain as UTF-16LE)
+  const identity = Buffer.from((username.toUpperCase() + domain), 'utf16le');
   const v2Hash   = hmacMd5(ntHash, identity);
 
   // Client challenge (8 random bytes)
@@ -114,6 +142,7 @@ export function encodeAuthenticate(
     cc,                                     // ClientChallenge
     Buffer.alloc(4, 0),                     // Reserved3
     ch.targetInfo,                          // AvPairs from server
+    Buffer.alloc(4, 0),                     // trailing Z(4) required by spec
   ]);
 
   // NT proof and responses
@@ -123,6 +152,21 @@ export function encodeAuthenticate(
     hmacMd5(v2Hash, Buffer.concat([ch.serverChallenge, cc])),
     cc,
   ]);
+
+  const sessionBaseKey = hmacMd5(v2Hash, ntProof);
+  const useKeyExchange = !!(ch.flags & F_KEY_EXCH);
+
+  let exportedSessionKey: Buffer;
+  let encryptedSessionKey: Buffer;
+  if (useKeyExchange) {
+    exportedSessionKey = crypto.randomBytes(16);
+    encryptedSessionKey = rc4Encrypt(sessionBaseKey, exportedSessionKey);
+  } else {
+    exportedSessionKey = sessionBaseKey;
+    encryptedSessionKey = Buffer.alloc(0);
+  }
+
+  const authFlags = BASE_AUTH_FLAGS | (useKeyExchange ? F_KEY_EXCH : 0);
 
   // Encode strings as UTF-16LE
   const userBuf = Buffer.from(username, 'utf16le');
@@ -136,7 +180,8 @@ export function encodeAuthenticate(
   const domOff = ntOff + ntResponse.length;
   const usrOff = domOff + domBuf.length;
   const wsOff  = usrOff + userBuf.length;
-  const total  = wsOff  + wsBuf.length;
+  const sessionKeyOff = wsOff + wsBuf.length;
+  const total  = sessionKeyOff + encryptedSessionKey.length;
 
   const msg = Buffer.alloc(total, 0);
   let p = 0;
@@ -169,11 +214,13 @@ export function encodeAuthenticate(
   msg.writeUInt16LE(wsBuf.length, p); p += 2;
   msg.writeUInt32LE(wsOff, p); p += 4;
 
-  // EncryptedRandomSessionKeyFields (empty — no key exchange)
-  p += 8; // already zeroed
+  // EncryptedRandomSessionKeyFields
+  msg.writeUInt16LE(encryptedSessionKey.length, p); p += 2;
+  msg.writeUInt16LE(encryptedSessionKey.length, p); p += 2;
+  msg.writeUInt32LE(sessionKeyOff, p); p += 4;
 
   // NegotiateFlags
-  msg.writeUInt32LE(AUTH_FLAGS, p); // p += 4 (no more fields)
+  msg.writeUInt32LE(authFlags, p); // p += 4 (no more fields)
 
   // Payload
   lmResponse.copy(msg, lmOff);
@@ -181,6 +228,17 @@ export function encodeAuthenticate(
   domBuf.copy(msg,  domOff);
   userBuf.copy(msg, usrOff);
   wsBuf.copy(msg,   wsOff);
+  encryptedSessionKey.copy(msg, sessionKeyOff);
 
-  return msg;
+  return { msg, exportedSessionKey };
+}
+
+export function encodeAuthenticate(
+  username: string,
+  domain: string,
+  workstation: string,
+  password: string,
+  ch: NtlmChallenge,
+): Buffer {
+  return encodeAuthenticateEx(username, domain, workstation, password, ch).msg;
 }
