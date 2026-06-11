@@ -49,6 +49,8 @@ const LB_PASSWORD = 0x00000010;
 const LB_TARGET_FQDN = 0x00000100;
 const LB_TARGET_NETBIOS_NAME = 0x00000200;
 const LB_PASSWORD_IS_PK_ENCRYPTED = 0x00004000;
+const RDP_TRACE_ENABLED = process.env.GATWY_RDP_TRACE === '1' || process.env.GATWY_RDP_TRACE === 'true';
+const RDP_TRACE_MAX_EVENTS = Number.parseInt(process.env.GATWY_RDP_TRACE_MAX_EVENTS ?? '300', 10);
 
 export function setupRdpProxy(server: https.Server): void {
   const wssRaw = new WebSocketServer({ noServer: true });
@@ -273,6 +275,13 @@ export function setupRdpProxy(server: https.Server): void {
     return frame[7] === MCS_DISCONNECT_PROVIDER_ULTIMATUM;
   }
 
+  function decodeDisconnectProviderUltimatumReason(frame: Buffer): { raw: number | null; decoded: number | null } {
+    if (!isDisconnectProviderUltimatum(frame)) return { raw: null, decoded: null };
+    if (frame.length < 9) return { raw: null, decoded: null };
+    const raw = frame[8];
+    return { raw, decoded: raw & 0x0f };
+  }
+
   function parseShareControlHeader(userData: Buffer): { pduType: number; body: Buffer } | null {
     if (userData.length < 8) return null;
     const totalLength = userData.readUInt16LE(0);
@@ -430,11 +439,14 @@ export function setupRdpProxy(server: https.Server): void {
 
   function inspectServerPreActivationFrame(frame: Buffer, defaultPort: number):
     | { kind: 'other' }
-    | { kind: 'disconnect-provider-ultimatum' }
+    | { kind: 'disconnect-provider-ultimatum'; reasonRaw: number | null; reasonDecoded: number | null }
     | { kind: 'demand-active' }
     | { kind: 'deactivate-all' }
     | { kind: 'redirect'; redirect: RedirectInfo } {
-    if (isDisconnectProviderUltimatum(frame)) return { kind: 'disconnect-provider-ultimatum' };
+    if (isDisconnectProviderUltimatum(frame)) {
+      const reason = decodeDisconnectProviderUltimatumReason(frame);
+      return { kind: 'disconnect-provider-ultimatum', reasonRaw: reason.raw, reasonDecoded: reason.decoded };
+    }
 
     const indication = decodeSendDataIndication(frame);
     if (!indication || indication.channelId !== IO_CHANNEL_ID) return { kind: 'other' };
@@ -527,6 +539,43 @@ export function setupRdpProxy(server: https.Server): void {
     let closed = false;
     let originalPassword = '';
     const bufferedClientFrames: Buffer[] = [];
+    const traceStartedAt = Date.now();
+    let traceSeq = 0;
+    const traceEvents: Array<Record<string, unknown>> = [];
+
+    const trace = (event: string, details?: Record<string, unknown>) => {
+      if (!RDP_TRACE_ENABLED) return;
+      traceSeq += 1;
+      traceEvents.push({
+        seq: traceSeq,
+        tMs: Date.now() - traceStartedAt,
+        event,
+        ...(details ?? {}),
+      });
+      if (traceEvents.length > RDP_TRACE_MAX_EVENTS) traceEvents.shift();
+    };
+
+    const flushTrace = (reason: string, details?: Record<string, unknown>) => {
+      if (!RDP_TRACE_ENABLED) return;
+      console.error('[rdp-trace]', JSON.stringify({
+        reason,
+        sessionId,
+        userId,
+        connectionId,
+        target: `${conn.host}:${conn.port}`,
+        redirects: redirectCount,
+        activationComplete,
+        details: details ?? {},
+        events: traceEvents,
+      }));
+    };
+
+    trace('session.start', {
+      clientIp,
+      targetHost: conn.host,
+      targetPort: conn.port,
+      skipCertValidation: conn.skip_cert_validation === 1,
+    });
 
     if (conn.encrypted_password) {
       try { originalPassword = decrypt(conn.encrypted_password); } catch { /**/ }
@@ -539,6 +588,7 @@ export function setupRdpProxy(server: https.Server): void {
       }
       if (tlsTunnel) { try { tlsTunnel.destroy(); } catch { /**/ } tlsTunnel = null; }
       if (tunnel) { try { tunnel.destroy(); } catch { /**/ } tunnel = null; }
+      trace('session.cleanup');
     };
 
     // First WebSocket message = RDCleanPath request DER
@@ -548,9 +598,12 @@ export function setupRdpProxy(server: https.Server): void {
       try { x224cr = extractX224CR(rdcp); }
       catch (e) {
         console.error('[rdp] parse error:', e);
+        trace('client.initial-parse.error', { message: e instanceof Error ? e.message : String(e) });
+        flushTrace('client.initial-parse.error');
         if (ws.readyState === WebSocket.OPEN) { sendBinary(ws, encodeRDCleanPathError()); ws.close(4004, 'Bad PDU'); }
         return;
       }
+      trace('client.initial-parse.ok', { x224Length: x224cr.length });
 
       const formatUsername = (username: string, domain?: string) => {
         if (!domain || username.includes('\\') || username.includes('@')) return username;
@@ -561,6 +614,15 @@ export function setupRdpProxy(server: https.Server): void {
         if (redirect) redirectCount += 1;
         const generation = ++activeGeneration;
         preActivationServerBuf = Buffer.alloc(0);
+        trace('backend.connect.start', {
+          generation,
+          redirected: !!redirect,
+          redirectHost: redirect?.host,
+          redirectPort: redirect?.port,
+          hasRoutingToken: !!redirect?.routingToken,
+          hasRedirectUsername: !!redirect?.username,
+          hasRedirectPassword: !!redirect?.password,
+        });
 
         if (tlsTunnel) { try { tlsTunnel.destroy(); } catch { /**/ } }
         if (tunnel) { try { tunnel.destroy(); } catch { /**/ } }
@@ -572,10 +634,12 @@ export function setupRdpProxy(server: https.Server): void {
         const x224Request = redirect?.routingToken ? buildX224ConnectionRequest(x224cr, redirect.routingToken) : x224cr;
 
         tunnel = net.connect(targetPort, targetHost, () => tunnel!.write(x224Request));
+        trace('backend.tcp.connected', { generation, targetHost, targetPort, x224RequestLen: x224Request.length });
 
         readX224Pdu(tunnel)
           .then((x224cc) => {
             if (generation !== activeGeneration || ws.readyState !== WebSocket.OPEN) return;
+            trace('backend.x224.response', { generation, x224ResponseLen: x224cc.length });
 
             tlsTunnel = tls.connect({
               socket: tunnel!,
@@ -587,6 +651,7 @@ export function setupRdpProxy(server: https.Server): void {
             const currentTls = tlsTunnel;
             currentTls.once('secureConnect', async () => {
               if (generation !== activeGeneration || ws.readyState !== WebSocket.OPEN) return;
+              trace('backend.tls.secure', { generation, targetHost, targetPort });
 
               const certs: Buffer[] = [];
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -603,18 +668,21 @@ export function setupRdpProxy(server: https.Server): void {
               if (!browserHandshakeSent) {
                 ws.send(encodeRDCleanPathResponse(x224cc, targetHost, certs));
                 browserHandshakeSent = true;
+                trace('browser.handshake.sent', { generation, certCount: certs.length });
               }
 
               const selectedProtocol = getSelectedProtocol(x224cc);
               const redirectUser = redirect?.username ?? conn.username ?? '';
               const redirectPassword = redirect?.password ?? originalPassword;
               if (redirect && selectedProtocol === 0x02 && redirectUser && redirectPassword) {
+                trace('backend.credssp.start', { generation, selectedProtocol, hasRedirectDomain: !!redirect?.domain });
                 await performCredSSP(
                   currentTls,
                   formatUsername(redirectUser, redirect?.domain),
                   redirectPassword,
                   certs[0] ?? Buffer.alloc(0),
                 );
+                trace('backend.credssp.done', { generation });
               }
 
               currentTls.on('data', (chunk: Uint8Array) => {
@@ -640,8 +708,24 @@ export function setupRdpProxy(server: https.Server): void {
                   preActivationServerBuf = preActivationServerBuf.subarray(pduLen);
 
                   const inspection = inspectServerPreActivationFrame(frame, targetPort);
+                  trace('server.preactivation.frame', {
+                    generation,
+                    frameLen: frame.length,
+                    pduLen,
+                    kind: inspection.kind,
+                  });
                   if (inspection.kind === 'redirect') {
+                    trace('server.preactivation.redirect', {
+                      generation,
+                      redirectHost: inspection.redirect.host,
+                      redirectPort: inspection.redirect.port,
+                      hasRoutingToken: !!inspection.redirect.routingToken,
+                      hasUsername: !!inspection.redirect.username,
+                      hasPassword: !!inspection.redirect.password,
+                    });
                     if (redirectCount >= 4) {
+                      trace('server.preactivation.redirect.limit', { generation, redirectCount });
+                      flushTrace('redirect.limit');
                       if (ws.readyState === WebSocket.OPEN) ws.close(4003, 'Too many redirects');
                       cleanup();
                       return;
@@ -650,10 +734,19 @@ export function setupRdpProxy(server: https.Server): void {
                     return;
                   }
                   if (inspection.kind === 'deactivate-all') continue;
-                  if (inspection.kind === 'disconnect-provider-ultimatum') continue;
+                  if (inspection.kind === 'disconnect-provider-ultimatum') {
+                    trace('server.preactivation.disconnect-provider-ultimatum', {
+                      generation,
+                      reasonRaw: inspection.reasonRaw,
+                      reasonDecoded: inspection.reasonDecoded,
+                      frameHexHead: frame.subarray(0, Math.min(24, frame.length)).toString('hex'),
+                    });
+                    continue;
+                  }
                   if (inspection.kind === 'demand-active') {
                     activationComplete = true;
                     bufferedClientFrames.length = 0;
+                    trace('server.activation.complete', { generation });
                   }
 
                   if (ws.readyState === WebSocket.OPEN) ws.send(frame);
@@ -667,10 +760,13 @@ export function setupRdpProxy(server: https.Server): void {
 
               currentTls.once('close', () => {
                 if (generation !== activeGeneration || closed) return;
+                trace('backend.tls.close', { generation });
+                flushTrace('backend.tls.close');
                 if (ws.readyState === WebSocket.OPEN) ws.close(1000, 'TCP closed');
               });
 
               if (redirect && bufferedClientFrames.length > 0) {
+                trace('client.buffered.replay', { generation, bufferedCount: bufferedClientFrames.length });
                 for (const frame of bufferedClientFrames) {
                   if (!currentTls.destroyed && currentTls.writable) currentTls.write(frame);
                 }
@@ -680,6 +776,8 @@ export function setupRdpProxy(server: https.Server): void {
             currentTls.once('error', (e: Error) => {
               if (generation !== activeGeneration) return;
               console.error('[rdp] TLS error:', e.message);
+              trace('backend.tls.error', { generation, message: e.message });
+              flushTrace('backend.tls.error', { message: e.message });
               if (ws.readyState === WebSocket.OPEN) {
                 sendBinary(ws, encodeRDCleanPathError());
                 ws.close(4003, 'TLS error');
@@ -690,6 +788,8 @@ export function setupRdpProxy(server: https.Server): void {
           .catch((e) => {
             if (generation !== activeGeneration) return;
             console.error('[rdp] X.224 error:', e);
+            trace('backend.x224.error', { generation, message: e instanceof Error ? e.message : String(e) });
+            flushTrace('backend.x224.error', { message: e instanceof Error ? e.message : String(e) });
             if (ws.readyState === WebSocket.OPEN) {
               sendBinary(ws, encodeRDCleanPathError());
               ws.close(4003, 'X.224 error');
@@ -700,6 +800,8 @@ export function setupRdpProxy(server: https.Server): void {
         tunnel.on('error', (err: Error) => {
           if (generation !== activeGeneration) return;
           console.error('[rdp] TCP error:', err.message);
+          trace('backend.tcp.error', { generation, message: err.message });
+          flushTrace('backend.tcp.error', { message: err.message });
           if (ws.readyState === WebSocket.OPEN) ws.close(4003, 'TCP error');
           cleanup();
         });
@@ -715,6 +817,13 @@ export function setupRdpProxy(server: https.Server): void {
         }
 
         if (!activationComplete) bufferedClientFrames.push(Buffer.from(relayBytes));
+        if (!activationComplete) {
+          trace('client.frame.buffered', {
+            bufferedCount: bufferedClientFrames.length,
+            frameLen: relayBytes.byteLength,
+            colorDepthPatched,
+          });
+        }
         if (tlsTunnel && !tlsTunnel.destroyed && tlsTunnel.writable) tlsTunnel.write(relayBytes);
       };
       ws.on('message', wsRelayHandler);
@@ -723,6 +832,8 @@ export function setupRdpProxy(server: https.Server): void {
 
     ws.on('close', () => {
       closed = true;
+      trace('browser.ws.close');
+      flushTrace('browser.ws.close');
       cleanup();
       // Mark the session as ended in the DB — covers the case where the browser
       // closes/crashes before the client can call /recording/finalize.
@@ -733,6 +844,10 @@ export function setupRdpProxy(server: https.Server): void {
         target: `${conn.host}:${conn.port}`,
         details: { connectionId, sessionId }, ipAddress: clientIp });
     });
-    ws.on('error', () => cleanup());
+    ws.on('error', (err) => {
+      trace('browser.ws.error', { message: err.message });
+      flushTrace('browser.ws.error', { message: err.message });
+      cleanup();
+    });
   });
 }
