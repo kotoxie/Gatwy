@@ -270,9 +270,18 @@ export function setupRdpProxy(server: https.Server): void {
     return { channelId, userData: frame.subarray(off, off + userDataLen.value) };
   }
 
+  function getMcsTypeByte(frame: Buffer): number | null {
+    if (frame.length < 8 || frame[0] !== 0x03 || frame[1] !== 0x00 || frame[5] !== 0xf0) return null;
+    return frame[7];
+  }
+
   function isDisconnectProviderUltimatum(frame: Buffer): boolean {
-    if (frame.length < 8 || frame[0] !== 0x03 || frame[1] !== 0x00 || frame[5] !== 0xf0) return false;
-    return frame[7] === MCS_DISCONNECT_PROVIDER_ULTIMATUM;
+    const mcsType = getMcsTypeByte(frame);
+    if (mcsType === null) return false;
+    if (mcsType === MCS_DISCONNECT_PROVIDER_ULTIMATUM) return true;
+    // Some servers encode this choice with PER class bits in the upper nibble.
+    if ((mcsType & 0xfc) === 0x28) return true;
+    return false;
   }
 
   function decodeDisconnectProviderUltimatumReason(frame: Buffer): { raw: number | null; decoded: number | null } {
@@ -438,24 +447,33 @@ export function setupRdpProxy(server: https.Server): void {
   }
 
   function inspectServerPreActivationFrame(frame: Buffer, defaultPort: number):
-    | { kind: 'other' }
-    | { kind: 'disconnect-provider-ultimatum'; reasonRaw: number | null; reasonDecoded: number | null }
+    | { kind: 'other'; mcsType: number | null; frameHexHead: string }
+    | { kind: 'disconnect-provider-ultimatum'; reasonRaw: number | null; reasonDecoded: number | null; mcsType: number | null; frameHexHead: string }
     | { kind: 'demand-active' }
     | { kind: 'deactivate-all' }
     | { kind: 'redirect'; redirect: RedirectInfo } {
+    const frameHexHead = frame.subarray(0, Math.min(24, frame.length)).toString('hex');
+    const mcsType = getMcsTypeByte(frame);
+
     if (isDisconnectProviderUltimatum(frame)) {
       const reason = decodeDisconnectProviderUltimatumReason(frame);
-      return { kind: 'disconnect-provider-ultimatum', reasonRaw: reason.raw, reasonDecoded: reason.decoded };
+      return {
+        kind: 'disconnect-provider-ultimatum',
+        reasonRaw: reason.raw,
+        reasonDecoded: reason.decoded,
+        mcsType,
+        frameHexHead,
+      };
     }
 
     const indication = decodeSendDataIndication(frame);
-    if (!indication || indication.channelId !== IO_CHANNEL_ID) return { kind: 'other' };
+    if (!indication || indication.channelId !== IO_CHANNEL_ID) return { kind: 'other', mcsType, frameHexHead };
 
     const basicRedirection = parseServerRedirectionPacket(indication.userData, defaultPort);
     if (basicRedirection) return { kind: 'redirect', redirect: basicRedirection };
 
     const shareControl = parseShareControlHeader(indication.userData);
-    if (!shareControl) return { kind: 'other' };
+    if (!shareControl) return { kind: 'other', mcsType, frameHexHead };
 
     if (shareControl.pduType === PDU_TYPE_DEACTIVATE_ALL) return { kind: 'deactivate-all' };
     if (shareControl.pduType === PDU_TYPE_DEMAND_ACTIVE) return { kind: 'demand-active' };
@@ -464,7 +482,7 @@ export function setupRdpProxy(server: https.Server): void {
       if (redirect) return { kind: 'redirect', redirect };
     }
 
-    return { kind: 'other' };
+    return { kind: 'other', mcsType, frameHexHead };
   }
 
   function rawDataToBytes(data: RawData): Uint8Array {
@@ -713,6 +731,8 @@ export function setupRdpProxy(server: https.Server): void {
                     frameLen: frame.length,
                     pduLen,
                     kind: inspection.kind,
+                    mcsType: inspection.kind === 'other' || inspection.kind === 'disconnect-provider-ultimatum' ? inspection.mcsType : null,
+                    frameHexHead: inspection.kind === 'other' || inspection.kind === 'disconnect-provider-ultimatum' ? inspection.frameHexHead : null,
                   });
                   if (inspection.kind === 'redirect') {
                     trace('server.preactivation.redirect', {
@@ -737,9 +757,10 @@ export function setupRdpProxy(server: https.Server): void {
                   if (inspection.kind === 'disconnect-provider-ultimatum') {
                     trace('server.preactivation.disconnect-provider-ultimatum', {
                       generation,
+                      mcsType: inspection.mcsType,
                       reasonRaw: inspection.reasonRaw,
                       reasonDecoded: inspection.reasonDecoded,
-                      frameHexHead: frame.subarray(0, Math.min(24, frame.length)).toString('hex'),
+                      frameHexHead: inspection.frameHexHead,
                     });
                     continue;
                   }
