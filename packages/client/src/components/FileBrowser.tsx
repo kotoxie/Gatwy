@@ -121,6 +121,8 @@ export function FileBrowser({
   const [infoFile, setInfoFile] = useState<{ filename: string; stats: any } | null>(null);
   const [infoLoading, setInfoLoading] = useState(false);
   const [chmodMode, setChmodMode] = useState('');
+  const [sortCol, setSortCol] = useState<'name' | 'size' | 'type'>('name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -513,11 +515,28 @@ export function FileBrowser({
     setContextMenu({ x: e.clientX, y: e.clientY, file: f });
   }
 
+  function toggleSort(col: 'name' | 'size' | 'type') {
+    if (sortCol === col) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortCol(col);
+      setSortDir('asc');
+    }
+  }
+
   const sortedFiles = [...files].sort((a, b) => {
     const aDir = isDir(a), bDir = isDir(b);
     if (aDir && !bDir) return -1;
     if (!aDir && bDir) return 1;
-    return a.filename.localeCompare(b.filename);
+    let cmp = 0;
+    if (sortCol === 'name') {
+      cmp = a.filename.localeCompare(b.filename);
+    } else if (sortCol === 'size') {
+      cmp = (a.size ?? 0) - (b.size ?? 0);
+    } else {
+      cmp = getTypeBadge(a).localeCompare(getTypeBadge(b));
+    }
+    return sortDir === 'asc' ? cmp : -cmp;
   });
 
   const pathParts = path ? path.split(pathSep).filter(Boolean) : [];
@@ -766,25 +785,74 @@ export function FileBrowser({
         )}
         {!loading && sortedFiles.length > 0 && (
           <div className="px-2 py-1.5">
-            {/* Select-all header row */}
-            <div
-              className="flex items-center gap-2 px-2 py-1.5 mb-0.5 rounded-md cursor-pointer text-text-secondary hover:bg-surface-hover transition-colors"
-              onClick={toggleSelectAll}
-            >
+            {/* Column header row with select-all and sort controls */}
+            <div className="flex items-center gap-2 px-2 py-1 mb-0.5 border-b border-border/30">
               <div
-                className={`flex items-center justify-center w-4 h-4 rounded border-2 transition-all shrink-0 ${
+                className={`flex items-center justify-center w-4 h-4 rounded border-2 transition-all shrink-0 cursor-pointer ${
                   allSelected
                     ? 'bg-accent border-accent text-white shadow-xs'
                     : someSelected
                       ? 'bg-accent/40 border-accent text-white'
                       : 'border-border/60 text-transparent hover:border-accent/70'
                 }`}
+                onClick={toggleSelectAll}
+                title={allSelected ? 'Deselect all' : 'Select all'}
               >
                 {(allSelected || someSelected) && <CheckIcon />}
               </div>
-              <span className="text-xs font-medium select-none">
-                {allSelected ? 'Deselect all' : `Select all (${sortedFiles.length})`}
-              </span>
+              {/* icon spacer */}
+              <div className="w-5 shrink-0" />
+              <button
+                onClick={() => toggleSort('name')}
+                className="flex-1 flex items-center gap-1 text-left text-[11px] font-semibold text-text-secondary hover:text-text-primary transition-colors select-none"
+              >
+                Name
+                {sortCol === 'name' ? (
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-accent">
+                    {sortDir === 'asc'
+                      ? <polyline points="18 15 12 9 6 15" />
+                      : <polyline points="6 9 12 15 18 9" />}
+                  </svg>
+                ) : (
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-30">
+                    <polyline points="18 15 12 9 6 15" />
+                  </svg>
+                )}
+              </button>
+              <button
+                onClick={() => toggleSort('size')}
+                className="shrink-0 w-16 flex items-center justify-end gap-1 text-[11px] font-semibold text-text-secondary hover:text-text-primary transition-colors select-none"
+              >
+                {sortCol === 'size' ? (
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-accent">
+                    {sortDir === 'asc'
+                      ? <polyline points="18 15 12 9 6 15" />
+                      : <polyline points="6 9 12 15 18 9" />}
+                  </svg>
+                ) : (
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-30">
+                    <polyline points="18 15 12 9 6 15" />
+                  </svg>
+                )}
+                Size
+              </button>
+              <button
+                onClick={() => toggleSort('type')}
+                className="shrink-0 w-12 text-left text-[11px] font-semibold text-text-secondary hover:text-text-primary transition-colors select-none flex items-center gap-1"
+              >
+                Type
+                {sortCol === 'type' ? (
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-accent">
+                    {sortDir === 'asc'
+                      ? <polyline points="18 15 12 9 6 15" />
+                      : <polyline points="6 9 12 15 18 9" />}
+                  </svg>
+                ) : (
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-30">
+                    <polyline points="18 15 12 9 6 15" />
+                  </svg>
+                )}
+              </button>
             </div>
             {sortedFiles.map((f) => {
               const isSelected = selectedFiles.has(f.filename);

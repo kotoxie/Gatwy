@@ -17,7 +17,7 @@ const F_ESS      = 0x00080000; // NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY
 const F_KEY_EXCH = 0x40000000; // NTLMSSP_NEGOTIATE_KEY_EXCH
 const F_128      = 0x20000000; // NTLMSSP_NEGOTIATE_128
 
-const NEGOTIATE_FLAGS = F_UNICODE | F_TARGET | F_NTLM | F_SIGN | F_ESS | F_KEY_EXCH | F_128;
+const NEGOTIATE_FLAGS = F_UNICODE | F_TARGET | F_NTLM | F_SIGN | F_ESS | F_128;
 const BASE_AUTH_FLAGS = F_UNICODE | F_TARGET | F_NTLM | F_SIGN | F_ESS | F_128;
 
 function rc4Encrypt(key: Buffer, data: Buffer): Buffer {
@@ -85,6 +85,26 @@ export interface NtlmChallenge {
   flags: number;
 }
 
+// ─── AvPair helpers ──────────────────────────────────────────────────────────
+// MsvAvFlags AvId = 0x0006; bit 0x02 = server requires MIC in Authenticate
+const MSV_AV_FLAGS_ID        = 0x0006;
+const NTLMSSP_AVFLAG_MIC_REQ = 0x00000002;
+
+function getMsvAvFlags(targetInfo: Buffer): number {
+  let offset = 0;
+  while (offset + 4 <= targetInfo.length) {
+    const avId  = targetInfo.readUInt16LE(offset);
+    const avLen = targetInfo.readUInt16LE(offset + 2);
+    offset += 4;
+    if (avId === 0) break; // MsvAvEOL
+    if (avId === MSV_AV_FLAGS_ID && avLen >= 4) {
+      return targetInfo.readUInt32LE(offset);
+    }
+    offset += avLen;
+  }
+  return 0;
+}
+
 export function decodeChallenge(buf: Buffer): NtlmChallenge {
   if (buf.length < 32) throw new Error('NTLM Type 2: buffer too short');
   if (buf.toString('binary', 0, 8) !== 'NTLMSSP\0') throw new Error('NTLM Type 2: bad signature');
@@ -120,6 +140,8 @@ export function encodeAuthenticateEx(
   workstation: string,
   password: string,
   ch: NtlmChallenge,
+  negotiateMsg?: Buffer,
+  challengeMsg?: Buffer,
 ): { msg: Buffer; exportedSessionKey: Buffer } {
   // NT hash = MD4(UTF-16LE password)
   const ntHash   = md4(Buffer.from(password, 'utf16le'));
@@ -154,27 +176,27 @@ export function encodeAuthenticateEx(
   ]);
 
   const sessionBaseKey = hmacMd5(v2Hash, ntProof);
-  const useKeyExchange = !!(ch.flags & F_KEY_EXCH);
+  // Disable KEY_EXCH to avoid signing-key mismatch on strict SMB servers.
+  // Use SessionBaseKey directly as ExportedSessionKey and do not send
+  // EncryptedRandomSessionKey in Type 3.
+  const exportedSessionKey = sessionBaseKey;
+  const encryptedSessionKey = Buffer.alloc(0);
 
-  let exportedSessionKey: Buffer;
-  let encryptedSessionKey: Buffer;
-  if (useKeyExchange) {
-    exportedSessionKey = crypto.randomBytes(16);
-    encryptedSessionKey = rc4Encrypt(sessionBaseKey, exportedSessionKey);
-  } else {
-    exportedSessionKey = sessionBaseKey;
-    encryptedSessionKey = Buffer.alloc(0);
-  }
-
-  const authFlags = BASE_AUTH_FLAGS | (useKeyExchange ? F_KEY_EXCH : 0);
+  const authFlags = BASE_AUTH_FLAGS;
 
   // Encode strings as UTF-16LE
   const userBuf = Buffer.from(username, 'utf16le');
   const domBuf  = Buffer.from(domain,   'utf16le');
   const wsBuf   = Buffer.from(workstation.toUpperCase(), 'utf16le');
 
-  // Fixed header: 64 bytes (8 sig + 4 type + 8*5 fields + 8 session key field + 4 flags)
-  const HEADER = 64;
+  // Windows 11 sets MsvAvFlags bit 0x02 in TargetInfo, requiring a 16-byte MIC
+  // at offset 72 of the Authenticate message (preceded by an 8-byte Version field).
+  // Without it, Windows 11 rejects the authentication even though NTLMv2 is correct.
+  const avFlags = getMsvAvFlags(ch.targetInfo);
+  const needMic = !!(avFlags & NTLMSSP_AVFLAG_MIC_REQ) && negotiateMsg != null && challengeMsg != null;
+
+  // Header: 64 bytes base + (8 Version + 16 MIC) when MIC is required
+  const HEADER = needMic ? 88 : 64;
   const lmOff  = HEADER;
   const ntOff  = lmOff + lmResponse.length;
   const domOff = ntOff + ntResponse.length;
@@ -188,6 +210,7 @@ export function encodeAuthenticateEx(
 
   SIG.copy(msg, p); p += 8;
   msg.writeUInt32LE(0x03, p); p += 4; // MessageType = 3
+  // p === 12 here
 
   // LmChallengeResponseFields
   msg.writeUInt16LE(lmResponse.length, p); p += 2;
@@ -220,7 +243,19 @@ export function encodeAuthenticateEx(
   msg.writeUInt32LE(sessionKeyOff, p); p += 4;
 
   // NegotiateFlags
-  msg.writeUInt32LE(authFlags, p); // p += 4 (no more fields)
+  msg.writeUInt32LE(authFlags, p); p += 4;
+
+  if (needMic) {
+    // Version (8 bytes at offset 64): Windows 10.0 build 19041, NTLM revision 15
+    msg[p]     = 10;  // ProductMajorVersion
+    msg[p + 1] = 0;   // ProductMinorVersion
+    msg.writeUInt16LE(19041, p + 2); // ProductBuild
+    // bytes p+4 to p+6 are Reserved (already 0)
+    msg[p + 7] = 15;  // NTLMRevisionCurrent
+    p += 8;
+    // MIC (16 bytes at offset 72) — leave zeroed for now, compute after
+    p += 16;
+  }
 
   // Payload
   lmResponse.copy(msg, lmOff);
@@ -229,6 +264,13 @@ export function encodeAuthenticateEx(
   userBuf.copy(msg, usrOff);
   wsBuf.copy(msg,   wsOff);
   encryptedSessionKey.copy(msg, sessionKeyOff);
+
+  if (needMic) {
+    // MIC = HMAC_MD5(exportedSessionKey, NEGOTIATE_MSG || CHALLENGE_MSG || AUTHENTICATE_MSG)
+    // The MIC field in AUTHENTICATE_MSG must be zeroed during computation (it is, since we just allocated)
+    const mic = hmacMd5(exportedSessionKey, Buffer.concat([negotiateMsg!, challengeMsg!, msg]));
+    mic.copy(msg, 72);
+  }
 
   return { msg, exportedSessionKey };
 }
@@ -239,6 +281,8 @@ export function encodeAuthenticate(
   workstation: string,
   password: string,
   ch: NtlmChallenge,
+  negotiateMsg?: Buffer,
+  challengeMsg?: Buffer,
 ): Buffer {
-  return encodeAuthenticateEx(username, domain, workstation, password, ch).msg;
+  return encodeAuthenticateEx(username, domain, workstation, password, ch, negotiateMsg, challengeMsg).msg;
 }
