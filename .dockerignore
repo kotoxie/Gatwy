@@ -11,6 +11,9 @@ node_modules
 # Local data volume
 data
 
+# Local moonlight-web binary drops (image downloads release assets)
+moonlight-web
+
 # Editor / OS artifacts
 .DS_Store
 *.log

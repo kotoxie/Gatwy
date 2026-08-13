@@ -4,6 +4,7 @@ import { RdpSession } from './RdpSession';
 import { SshSession } from './SshSession';
 import { SmbSession } from './SmbSession';
 import { VncSession } from './VncSession';
+import { MoonlightSession } from './MoonlightSession';
 import { SftpSession } from './SftpSession';
 import { FtpSession } from './FtpSession';
 import { TelnetSession } from './TelnetSession';
@@ -100,6 +101,15 @@ export function SessionsLayer({
             )}
             {tab.protocol === 'vnc' && (
               <VncSession
+                connectionId={tab.connectionId}
+                connectionName={tab.name}
+                isActive={isActive}
+                onStatusChange={(status) => onStatusChange(tab.id, status)}
+                onClose={() => onClose(tab.id)}
+              />
+            )}
+            {tab.protocol === 'moonlight' && (
+              <MoonlightSession
                 connectionId={tab.connectionId}
                 connectionName={tab.name}
                 isActive={isActive}

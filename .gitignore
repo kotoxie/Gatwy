@@ -1,6 +1,7 @@
 node_modules/
 dist/
 data/
+moonlight-web/
 *.env
 .env.*
 *.log

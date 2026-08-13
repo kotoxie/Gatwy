@@ -8,7 +8,7 @@ export const ALL_PERMISSIONS = [
   'audit.view_own', 'audit.view_any',
   'users.manage', 'settings.manage', 'settings.auth_providers', 'settings.security', 'settings.backup', 'settings.notifications',
   'roles.manage',
-  'protocols.ssh', 'protocols.rdp', 'protocols.vnc', 'protocols.smb', 'protocols.ftp', 'protocols.telnet',
+  'protocols.ssh', 'protocols.rdp', 'protocols.vnc', 'protocols.moonlight', 'protocols.smb', 'protocols.ftp', 'protocols.telnet',
   'protocols.postgres', 'protocols.mysql',
 ] as const;
 
@@ -21,7 +21,7 @@ export const DEFAULT_BUILTIN_PERMISSIONS: Record<string, PermissionKey[]> = {
     'connections.create', 'connections.edit_own', 'connections.delete_own', 'connections.share', 'connections.import_export',
     'sessions.view_own',
     'audit.view_own',
-    'protocols.ssh', 'protocols.rdp', 'protocols.vnc', 'protocols.smb', 'protocols.ftp', 'protocols.telnet',
+    'protocols.ssh', 'protocols.rdp', 'protocols.vnc', 'protocols.moonlight', 'protocols.smb', 'protocols.ftp', 'protocols.telnet',
     'protocols.postgres', 'protocols.mysql',
   ],
 };
@@ -73,6 +73,7 @@ export const PERMISSION_GROUPS: Record<string, { label: string; permissions: { k
       { key: 'protocols.ssh', label: 'SSH' },
       { key: 'protocols.rdp', label: 'RDP' },
       { key: 'protocols.vnc', label: 'VNC' },
+      { key: 'protocols.moonlight', label: 'Moonlight / Sunshine' },
       { key: 'protocols.smb', label: 'SMB' },
       { key: 'protocols.ftp', label: 'FTP' },
       { key: 'protocols.telnet', label: 'Telnet' },

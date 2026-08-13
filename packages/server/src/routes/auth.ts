@@ -10,6 +10,7 @@ import { config } from '../config.js';
 import { createLoginSession, hashToken } from '../services/loginSession.js';
 import { authRequired, adminRequired } from '../middleware/auth.js';
 import { getPermissionsForRole } from '../services/permissions.js';
+import { runtimeFeatures } from '../services/moonlightWeb.js';
 import { verifySync as otpVerify } from 'otplib';
 import { parseUA } from '../services/ua.js';
 import { issueWsTicket } from '../services/wsTicket.js';
@@ -322,6 +323,7 @@ router.post('/setup', async (req: Request, res: Response) => {
   res.json({
     token,
     user: { id, username, displayName, role: 'admin', theme: null, permissions: getPermissionsForRole('admin'), dismissedWarnings: [] },
+    features: runtimeFeatures(),
   });
 });
 
@@ -458,6 +460,7 @@ router.post('/login', async (req: Request, res: Response) => {
       permissions: getPermissionsForRole(user.role),
       dismissedWarnings: parseDismissedWarnings(user.dismissed_warnings_json),
     },
+    features: runtimeFeatures(),
     ...(proxyIp ? { proxyIp } : {}),
   });
 });
@@ -539,6 +542,7 @@ router.post('/login/mfa', async (req: Request, res: Response) => {
       permissions: getPermissionsForRole(user.role),
       dismissedWarnings: parseDismissedWarnings(user.dismissed_warnings_json),
     },
+    features: runtimeFeatures(),
     ...(proxyIp ? { proxyIp } : {}),
   });
 });
@@ -705,6 +709,7 @@ router.post('/login/passkey', async (req: Request, res: Response) => {
       permissions: getPermissionsForRole(user.role),
       dismissedWarnings: parseDismissedWarnings(user.dismissed_warnings_json),
     },
+    features: runtimeFeatures(),
     ...(proxyIp ? { proxyIp } : {}),
   });
 });
@@ -762,6 +767,7 @@ router.get('/me', authRequired, (req: Request, res: Response) => {
       permissions: getPermissionsForRole(user.role),
       dismissedWarnings: parseDismissedWarnings(user.dismissed_warnings_json),
     },
+    features: runtimeFeatures(),
   });
 });
 
@@ -822,6 +828,7 @@ router.post('/login/ldap', async (req: Request, res: Response) => {
   res.json({
     token,
     user: { id: user.id, username: user.username, displayName: user.display_name, role: user.role, theme: null, permissions: getPermissionsForRole(user.role), dismissedWarnings: [] },
+    features: runtimeFeatures(),
     ...(proxyIp ? { proxyIp } : {}),
   });
 });

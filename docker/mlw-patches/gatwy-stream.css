@@ -1,0 +1,400 @@
+/*
+ * Gatwy chrome for embedded moonlight-web stream pages.
+ * Match RDP session status (dark translucent, muted copy).
+ * Keep in sync with MLW_CHROME_STYLE in MoonlightSession.tsx (runtime inject).
+ */
+
+/* Soften MLW accent tokens used by connecting UI.
+ * !important is required — standard.css hardcodes #00d4ff / #00f5ff / #00ffff
+ * and color: var(--accent-cyan-2); variables alone do not win. */
+html.stream,
+html.stream body,
+body.stream {
+  --accent-cyan: rgba(255, 255, 255, 0.4) !important;
+  --accent-cyan-2: rgba(255, 255, 255, 0.5) !important;
+  --accent-cyan-light: rgba(255, 255, 255, 0.6) !important;
+  --glow-cyan: none !important;
+  --glow-cyan-bright: none !important;
+  --shadow-button: 0 4px 12px rgba(0, 0, 0, 0.45) !important;
+  --text-1: rgba(255, 255, 255, 0.65) !important;
+  --bg-0: #000000 !important;
+  --bg-1: #050505 !important;
+  --bg-2: #000000 !important;
+  --bg-3: #0a0a0a !important;
+  color: rgba(255, 255, 255, 0.7) !important;
+  text-shadow: none !important;
+  background: #000 !important;
+  background-image: none !important;
+}
+
+/* Solid black backdrop during connect / reconnect (no MLW gradient). */
+html.stream body::before,
+body.stream::before {
+  background: #000 !important;
+  background-image: none !important;
+  background-color: #000 !important;
+  box-shadow: none !important;
+  filter: none !important;
+  opacity: 1 !important;
+}
+
+/* Connecting modal backdrop — quiet, centered, not purple/cyan neon */
+.modal-background:not(.modal-disabled):has(.modal-video-connect),
+.modal-background:not(.modal-disabled):has(.host-loading-overlay) {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background-color: rgba(0, 0, 0, 0.62) !important;
+  backdrop-filter: blur(1px) !important;
+}
+
+.modal-background:not(.modal-disabled):has(.modal-video-connect) .modal-content,
+.modal-background:not(.modal-disabled):has(.host-loading-overlay) .modal-content {
+  background: rgba(16, 16, 18, 0.94) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5) !important;
+  color: rgba(255, 255, 255, 0.65) !important;
+  width: auto !important;
+  max-width: min(280px, 84vw) !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 14px 16px !important;
+  border-radius: 10px !important;
+  text-shadow: none !important;
+  overflow: hidden !important;
+}
+
+.modal-video-connect {
+  align-items: center !important;
+  gap: 8px !important;
+  min-height: 0 !important;
+  color: rgba(255, 255, 255, 0.7) !important;
+  text-shadow: none !important;
+}
+
+.modal-video-connect > p,
+.modal-video-connect .textlike,
+.modal-video-connect p {
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  line-height: 1.35 !important;
+  color: rgba(255, 255, 255, 0.7) !important;
+  text-shadow: none !important;
+  text-align: center !important;
+  margin: 0 !important;
+  white-space: pre-wrap !important;
+}
+
+.modal-video-connect .modal-video-connect-options {
+  width: 100%;
+  justify-content: center !important;
+  gap: 6px !important;
+  margin-top: 2px !important;
+  min-height: 28px !important;
+}
+
+/* MLW appends Show logs first, Close second — hide Show logs during normal connect.
+   Reveal on hover/focus or once the debug panel is open (errors / manual expand). */
+.modal-video-connect:not(:has(.modal-video-connect-debug)) .modal-video-connect-options button:first-child {
+  display: none !important;
+}
+
+.modal-video-connect:hover:not(:has(.modal-video-connect-debug)) .modal-video-connect-options button:first-child,
+.modal-video-connect:focus-within:not(:has(.modal-video-connect-debug)) .modal-video-connect-options button:first-child,
+.modal-video-connect:has(.modal-video-connect-debug) .modal-video-connect-options button:first-child {
+  display: inline-flex !important;
+}
+
+.modal-video-connect .modal-video-connect-options button,
+.modal-video-connect button {
+  background: transparent !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  padding: 5px 10px !important;
+  border-radius: 8px !important;
+  margin: 0 !important;
+}
+
+.modal-video-connect .modal-video-connect-options button:hover,
+.modal-video-connect button:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: rgba(255, 255, 255, 0.78) !important;
+  transform: none !important;
+}
+
+.modal-video-connect .modal-video-connect-debug {
+  max-width: 100% !important;
+  max-height: 28vh !important;
+  font-size: 11px !important;
+  color: rgba(255, 255, 255, 0.4) !important;
+  text-shadow: none !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 8px;
+  margin-top: 4px;
+}
+
+/* Host tile / loading overlay spinners */
+.host-element.connecting::before {
+  width: 18px !important;
+  height: 18px !important;
+  margin: -9px 0 0 -9px !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.16) !important;
+  border-top-color: rgba(255, 255, 255, 0.55) !important;
+  box-shadow: none !important;
+}
+
+.host-loading-overlay {
+  background: rgba(0, 0, 0, 0.62) !important;
+  backdrop-filter: blur(1px) !important;
+}
+
+.host-loading-spinner {
+  width: 18px !important;
+  height: 18px !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.14) !important;
+  border-top-color: rgba(255, 255, 255, 0.55) !important;
+  box-shadow: none !important;
+}
+
+.host-loading-text {
+  font-size: 12px !important;
+  color: rgba(255, 255, 255, 0.7) !important;
+  text-shadow: none !important;
+}
+
+.host-loading-cancel {
+  background: transparent !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+}
+
+.host-loading-cancel:hover,
+.host-loading-cancel:active,
+.host-loading-cancel:focus {
+  transform: none !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  box-shadow: none !important;
+}
+
+/*
+ * Override hardcoded cyan in moonlight-web standard.css on connect chrome.
+ * Selectors that set color:#00f5ff / #00d4ff / #00ffff or var(--accent-cyan-2)
+ * still win without these !important rules.
+ */
+html.stream .modal-video-connect,
+html.stream .modal-video-connect > p,
+html.stream .modal-video-connect p,
+html.stream .modal-video-connect .textlike,
+html.stream .textlike,
+html.stream .host-loading-text,
+html.stream .modal-background:not(.modal-disabled) .modal-content,
+html.stream .modal-background:not(.modal-disabled) .modal-content p,
+html.stream .modal-background:not(.modal-disabled) .modal-content span {
+  color: rgba(255, 255, 255, 0.7) !important;
+  text-shadow: none !important;
+}
+
+html.stream .modal-video-connect button,
+html.stream .modal-video-connect .modal-video-connect-options button,
+html.stream .host-loading-cancel {
+  color: rgba(255, 255, 255, 0.5) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+html.stream .host-element.connecting::before,
+html.stream .host-loading-spinner {
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  border-top-color: rgba(255, 255, 255, 0.55) !important;
+  box-shadow: none !important;
+}
+
+/*
+ * Hide MLW ViewerSidebar chrome completely (no left peeking arrow/tab).
+ * Gatwy’s right panel owns session controls. ScreenKeyboard’s hidden
+ * textarea is reparented to <body> by the runtime inject so focus still works
+ * when this overlay is display:none.
+ */
+.sidebar-overlay {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/*
+ * Lock the stream document inside the iframe. MLW’s standard.css sets
+ * body padding (safe-area) + min-height:100vh without overflow:hidden, so a
+ * fixed 100%×100% video fill can grow past the iframe viewport and show
+ * scrollbars. Zero out chrome and clip overflow.
+ */
+html.stream,
+html.stream body,
+body.stream {
+  --stream-video-top: 0;
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+  touch-action: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  box-sizing: border-box !important;
+  scrollbar-width: none !important;
+}
+
+html.stream::-webkit-scrollbar,
+html.stream body::-webkit-scrollbar,
+body.stream::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+#root,
+#input,
+.video-stream,
+video.video-stream,
+canvas.video-stream {
+  overflow: hidden !important;
+  touch-action: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+/*
+ * Quiet ALL MLW modal chrome (FormModal, message modals, connecting).
+ * Connecting-specific rules above refine size/copy; this kills neon cyan
+ * for anything else that still mounts via showModal.
+ */
+.modal-background:not(.modal-disabled) {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background-color: rgba(0, 0, 0, 0.62) !important;
+  backdrop-filter: blur(1px) !important;
+}
+
+.modal-background:not(.modal-disabled) .modal-content {
+  background: rgba(16, 16, 18, 0.94) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5) !important;
+  color: rgba(255, 255, 255, 0.65) !important;
+  text-shadow: none !important;
+  border-radius: 10px !important;
+  width: auto !important;
+  max-width: min(320px, 88vw) !important;
+  max-height: min(70vh, 480px) !important;
+  margin: 0 !important;
+  padding: 14px 16px !important;
+  overflow: auto !important;
+}
+
+.modal-content button,
+.modal-content input,
+.modal-content select,
+.modal-content .textlike {
+  background: transparent !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  color: rgba(255, 255, 255, 0.7) !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  border-radius: 8px !important;
+}
+
+.modal-content button:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: rgba(255, 255, 255, 0.88) !important;
+  transform: none !important;
+}
+
+/* Hide MLW toast stack — Gatwy owns session status / errors. */
+#notification-list,
+.notification-list,
+.notification-element {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+}
+
+/* Soften leftover neon on context menus + floating keyboard hide. */
+.context-menu-background {
+  background: rgba(16, 16, 18, 0.96) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5) !important;
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+.context-menu-element {
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+.context-menu-element:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-left: none !important;
+  transform: none !important;
+  padding-left: 10px !important;
+}
+
+.stream-keyboard-floating-button {
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  background: rgba(0, 0, 0, 0.55) !important;
+  color: rgba(255, 255, 255, 0.7) !important;
+  box-shadow: none !important;
+  border-radius: 10px !important;
+}
+
+/*
+ * Full-pane box + object-fit contain. Fill when the stream matches the
+ * pane (Auto after correct relaunch); true H+V center with black bars when
+ * smaller. No translate centering — 0.19.10’s top/left 50% + translate +
+ * width/height auto fought MLW’s --stream-video-top / canvas bitmap sizing
+ * and pushed the stream up/left. Windowed stays contain + center.
+ * Keep html/body overflow:hidden above.
+ */
+.video-stream,
+video.video-stream,
+canvas.video-stream {
+  position: fixed !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  transform: none !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  object-fit: contain !important;
+  object-position: center center !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+}
+
+/*
+ * Fullscreen safety net: residual letterbox after Auto relaunch when Sunshine
+ * WxH still slightly mismatches the FS pane. Parent toggles html.gatwy-fullscreen
+ * on the iframe document. Windowed must NOT use fill (smaller presets stay centered).
+ */
+html.gatwy-fullscreen .video-stream,
+html.gatwy-fullscreen video.video-stream,
+html.gatwy-fullscreen canvas.video-stream {
+  object-fit: fill !important;
+}

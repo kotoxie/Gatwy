@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect, type ReactNode, type FormEvent } from 'react';
 import { type Protocol } from '../types/protocol.js';
+import { ML_RESOLUTION_PRESETS, normalizeMlResolution } from '../lib/moonlightResolution';
 interface Connection {
   id: string;
   name: string;
@@ -35,6 +36,8 @@ interface ConnectionModalProps {
   onSaved: () => void;
   /** Pre-fill fields for duplicate/copy mode (connection must be null) */
   prefill?: ConnectionPrefill;
+  /** When false, Moonlight is omitted from the protocol picker (runtime unavailable). */
+  moonlightAvailable?: boolean;
 }
 
 interface TunnelDef { id: string; localPort: string; remoteHost: string; remotePort: string; }
@@ -44,6 +47,7 @@ const defaultPorts: Record<string, number> = {
   rdp: 3389,
   smb: 445,
   vnc: 5900,
+  moonlight: 47989,
   sftp: 22,
   ftp: 21,
   telnet: 23,
@@ -54,7 +58,7 @@ const defaultPorts: Record<string, number> = {
 type ProtocolCategory = 'remote-control' | 'terminal' | 'file-browser' | 'db';
 
 function getCategoryForProtocol(p: Protocol): ProtocolCategory {
-  if (p === 'rdp' || p === 'vnc') return 'remote-control';
+  if (p === 'rdp' || p === 'vnc' || p === 'moonlight') return 'remote-control';
   if (p === 'ssh' || p === 'telnet') return 'terminal';
   if (p === 'smb' || p === 'sftp' || p === 'ftp') return 'file-browser';
   return 'db';
@@ -85,6 +89,11 @@ const PROTOCOL_CATEGORIES: { id: ProtocolCategory; label: string; headerIcon: Re
           <circle cx="12" cy="10" r="3" />
           <line x1="8" y1="21" x2="16" y2="21" />
           <line x1="12" y1="17" x2="12" y2="21" />
+        </svg>
+      )},
+      { id: 'moonlight', label: 'Moonlight', icon: (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
         </svg>
       )},
     ],
@@ -176,7 +185,7 @@ const PROTOCOL_CATEGORIES: { id: ProtocolCategory; label: string; headerIcon: Re
   },
 ];
 
-export function ConnectionModal({ connection, groups, onClose, onSaved, prefill }: ConnectionModalProps) {
+export function ConnectionModal({ connection, groups, onClose, onSaved, prefill, moonlightAvailable = false }: ConnectionModalProps) {
 
   const [name, setName] = useState(prefill?.name ?? connection?.name ?? '');
   const [protocol, setProtocol] = useState<Protocol>(prefill?.protocol ?? connection?.protocol ?? 'rdp');
@@ -211,6 +220,12 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
   const [selectedShareRoles, setSelectedShareRoles] = useState<string[]>([]);
   const [selectedShareUsers, setSelectedShareUsers] = useState<string[]>([]);
   const [skipCertValidation, setSkipCertValidation] = useState(true);
+  const [mlAppName, setMlAppName] = useState('Desktop');
+  const [mlHttpPort, setMlHttpPort] = useState('');
+  const [mlAdminPort, setMlAdminPort] = useState('47990');
+  const [mlResolution, setMlResolution] = useState('auto');
+  const [mlPaired, setMlPaired] = useState(false);
+  const [mlForgetting, setMlForgetting] = useState(false);
   const newFolderInputRef = useRef<HTMLInputElement>(null);
 
   // Load full details when editing an existing connection
@@ -233,6 +248,13 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
         if (d.extraConfig?.rowLimit) setDbRowLimit(String(d.extraConfig.rowLimit));
         if (d.extraConfig?.queryTimeout) setDbQueryTimeout(String(d.extraConfig.queryTimeout));
         if (d.extraConfig?.idleTimeoutMinutes) setDbIdleTimeout(String(d.extraConfig.idleTimeoutMinutes));
+        if (d.extraConfig?.appName) setMlAppName(String(d.extraConfig.appName));
+        if (d.extraConfig?.httpPort) setMlHttpPort(String(d.extraConfig.httpPort));
+        if (d.extraConfig?.adminPort) setMlAdminPort(String(d.extraConfig.adminPort));
+        if (d.extraConfig?.resolution !== undefined) {
+          setMlResolution(normalizeMlResolution(d.extraConfig.resolution));
+        }
+        if (d.extraConfig?.paired) setMlPaired(!!d.extraConfig.paired);
         if (d.tags && Array.isArray(d.tags)) setTags(d.tags);
         if (d.skipCertValidation !== undefined) setSkipCertValidation(!!d.skipCertValidation);
         if (d.shares && Array.isArray(d.shares)) {
@@ -321,6 +343,19 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
       if (protocol === 'rdp') {
         body.skipCertValidation = skipCertValidation;
       }
+      if (protocol === 'moonlight') {
+        const mlCfg: Record<string, unknown> = {
+          appName: mlAppName.trim() || 'Desktop',
+          resolution: normalizeMlResolution(mlResolution),
+        };
+        if (mlHttpPort.trim()) mlCfg.httpPort = parseInt(mlHttpPort, 10);
+        if (mlAdminPort.trim()) mlCfg.adminPort = parseInt(mlAdminPort, 10);
+        body.extraConfig = mlCfg;
+        // Preserve pairing metadata server-side via merge on PUT — send flags for UI state only
+        if (connection?.id && mlPaired) {
+          (body.extraConfig as Record<string, unknown>).paired = true;
+        }
+      }
       if (tags.length > 0) body.tags = tags;
       const url = connection ? `/api/v1/connections/${connection.id}` : '/api/v1/connections';
       const method = connection ? 'PUT' : 'POST';
@@ -393,13 +428,16 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
           {/* Protocol sidebar */}
           <div className="w-44 flex-shrink-0 bg-surface border-r border-border rounded-l-lg py-3 overflow-y-auto">
             <p className="px-3 mb-1 text-[10px] font-semibold text-text-secondary uppercase tracking-wider">Protocol</p>
-            {PROTOCOL_CATEGORIES.map((cat) => (
+            {PROTOCOL_CATEGORIES.map((cat) => {
+              const protocols = cat.protocols.filter((p) => p.id !== 'moonlight' || moonlightAvailable);
+              if (protocols.length === 0) return null;
+              return (
               <div key={cat.id} className="mb-1">
                 <div className="flex items-center gap-1.5 px-3 py-1.5">
                   <span className="text-text-secondary">{cat.headerIcon}</span>
                   <span className="text-[10px] font-semibold text-text-secondary uppercase tracking-wider">{cat.label}</span>
                 </div>
-                {cat.protocols.map(({ id: p, label, icon }) => (
+                {protocols.map(({ id: p, label, icon }) => (
                   <button
                     key={p}
                     type="button"
@@ -415,7 +453,8 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
                   </button>
                 ))}
               </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Form content */}
@@ -460,28 +499,122 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
             </div>
           </div>
 
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <label className="block text-xs font-medium text-text-secondary mb-1">Username</label>
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="user"
-                className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent"
-              />
+          {protocol !== 'moonlight' && (
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <label className="block text-xs font-medium text-text-secondary mb-1">Username</label>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="user"
+                  className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="block text-xs font-medium text-text-secondary mb-1">Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={connection ? '(unchanged)' : ''}
+                  className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent"
+                />
+              </div>
             </div>
-            <div className="flex-1">
-              <label className="block text-xs font-medium text-text-secondary mb-1">Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder={connection ? '(unchanged)' : ''}
-                className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent"
-              />
+          )}
+
+          {protocol === 'moonlight' && (
+            <div className="space-y-2.5">
+              <p className="text-[11px] text-text-secondary leading-relaxed">
+                Host is the Sunshine PC. Default port <span className="text-text-primary">47989</span> is the GameStream HTTP port.
+                On first connect Gatwy shows a PIN to enter in the Sunshine web UI.
+              </p>
+              <div>
+                <label className="block text-xs font-medium text-text-secondary mb-1">Preferred app</label>
+                <input
+                  type="text"
+                  value={mlAppName}
+                  onChange={(e) => setMlAppName(e.target.value)}
+                  placeholder="Desktop"
+                  className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-text-secondary mb-1">Resolution</label>
+                <select
+                  value={mlResolution}
+                  onChange={(e) => setMlResolution(e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent"
+                >
+                  {ML_RESOLUTION_PRESETS.map((p) => (
+                    <option key={p.value} value={p.value}>{p.label}</option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-text-secondary mt-1">
+                  Auto uses the session tab size and follows browser resizes (host stream restart).
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-text-secondary mb-1">
+                    HTTP port override <span className="font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="number"
+                    value={mlHttpPort}
+                    onChange={(e) => setMlHttpPort(e.target.value)}
+                    placeholder={String(port || 47989)}
+                    className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-text-secondary mb-1">
+                    Sunshine admin UI <span className="font-normal">(hint)</span>
+                  </label>
+                  <input
+                    type="number"
+                    value={mlAdminPort}
+                    onChange={(e) => setMlAdminPort(e.target.value)}
+                    placeholder="47990"
+                    className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent"
+                  />
+                </div>
+              </div>
+              {connection?.id && (
+                <div className="flex items-center justify-between gap-2 px-3 py-2 rounded border border-border bg-surface">
+                  <div>
+                    <p className="text-xs font-medium text-text-primary">
+                      {mlPaired ? 'Paired with Sunshine' : 'Not paired yet'}
+                    </p>
+                    <p className="text-[11px] text-text-secondary mt-0.5">
+                      Forget pairing to show a new PIN on next connect.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={mlForgetting || !mlPaired}
+                    onClick={async () => {
+                      if (!connection?.id) return;
+                      setMlForgetting(true);
+                      try {
+                        const res = await fetch(`/api/v1/moonlight/${connection.id}/pairing`, {
+                          method: 'DELETE',
+                          credentials: 'include',
+                        });
+                        if (res.ok) setMlPaired(false);
+                      } finally {
+                        setMlForgetting(false);
+                      }
+                    }}
+                    className="px-2.5 py-1 text-xs rounded border border-border text-text-secondary hover:bg-surface-hover disabled:opacity-40"
+                  >
+                    {mlForgetting ? 'Forgetting…' : 'Forget pairing'}
+                  </button>
+                </div>
+              )}
             </div>
-          </div>
+          )}
 
           {protocol === 'ssh' && (
             <div>

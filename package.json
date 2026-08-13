@@ -1,6 +1,6 @@
 {
   "name": "Gatwy",
-  "version": "0.18.1",
+  "version": "0.19.17",
   "private": true,
   "engines": {
     "node": ">=22"
@@ -15,10 +15,12 @@
     "dev:client": "npm run dev --workspace=packages/client",
     "build": "npm run build --workspace=packages/client && npm run build --workspace=packages/server",
     "start": "npm run start --workspace=packages/server",
+    "test": "tsx --test packages/server/test/*.test.ts packages/client/test/*.test.ts",
     "clean": "rm -rf packages/server/dist packages/client/dist"
   },
   "devDependencies": {
     "concurrently": "^10.0.4",
+    "tsx": "^4.23.1",
     "typescript": "^7.0.2"
   }
 }

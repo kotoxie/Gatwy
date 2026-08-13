@@ -143,7 +143,7 @@ export function MainLayout() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<string | undefined>(undefined);
 
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, features } = useAuth();
   const { settings } = useSettings();
   const insecureKey = settings['system.insecure_key'] === 'true';
   const permanentlyDismissed = user?.dismissedWarnings?.includes('insecure_key') ?? false;
@@ -593,8 +593,11 @@ export function MainLayout() {
       const allNewViews: ViewData[] = [];
 
       for (const connList of savedViews) {
-        if (!connList.length) continue;
-        const connTabs: Tab[] = connList.map((c) => ({
+        const visible = features.moonlight
+          ? connList
+          : connList.filter((c) => c.protocol !== 'moonlight');
+        if (!visible.length) continue;
+        const connTabs: Tab[] = visible.map((c) => ({
           id: crypto.randomUUID(),
           connectionId: c.connectionId,
           name: c.name,
@@ -621,7 +624,7 @@ export function MainLayout() {
     } catch {
       localStorage.removeItem('gatwy-sessions');
     }
-  }, [user]);
+  }, [user, features.moonlight]);
 
   // Save sessions to localStorage whenever views/tabs change
   useEffect(() => {

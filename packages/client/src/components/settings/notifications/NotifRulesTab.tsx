@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { useAuth } from '../../../hooks/useAuth';
 
 const API = '/api/v1/notifications';
 
@@ -79,6 +80,9 @@ const EVENT_GROUPS: { label: string; events: { value: string; label: string }[] 
       { value: 'session.telnet.disconnect', label: 'Telnet session disconnected' },
       { value: 'session.vnc.connect', label: 'VNC session connected' },
       { value: 'session.vnc.disconnect', label: 'VNC session disconnected' },
+      { value: 'session.moonlight.connect', label: 'Moonlight session connected' },
+      { value: 'session.moonlight.disconnect', label: 'Moonlight session disconnected' },
+      { value: 'session.moonlight.pair', label: 'Moonlight pairing event' },
       { value: 'session.smb.connect', label: 'SMB session connected' },
       { value: 'session.sftp.connect', label: 'SFTP session connected' },
       { value: 'session.ftp.connect', label: 'FTP session connected' },
@@ -250,6 +254,13 @@ const GROUP_ICONS: Record<string, string> = {
 };
 
 function EventPicker({ events, onChange }: { events: string[]; onChange: (v: string[]) => void }) {
+  const { features } = useAuth();
+  const pickerGroups = features.moonlight
+    ? EVENT_GROUPS
+    : EVENT_GROUPS.map((g) => ({
+        ...g,
+        events: g.events.filter((ev) => !ev.value.includes('moonlight')),
+      }));
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -299,13 +310,13 @@ function EventPicker({ events, onChange }: { events: string[]; onChange: (v: str
   // Filter events by search term
   const q = search.toLowerCase();
   const filteredGroups = q
-    ? EVENT_GROUPS.map((g) => ({
+    ? pickerGroups.map((g) => ({
         ...g,
         events: g.events.filter(
           (ev) => ev.label.toLowerCase().includes(q) || ev.value.toLowerCase().includes(q),
         ),
       })).filter((g) => g.events.length > 0)
-    : EVENT_GROUPS;
+    : pickerGroups;
 
   const selectedCount = events.length;
 

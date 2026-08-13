@@ -10,6 +10,12 @@ interface User {
   dismissedWarnings: string[];
 }
 
+export interface RuntimeFeatures {
+  moonlight: boolean;
+}
+
+const FEATURES_OFF: RuntimeFeatures = { moonlight: false };
+
 interface LoginResult {
   mfaRequired?: boolean;
   mfaToken?: string;
@@ -21,6 +27,7 @@ interface AuthContextValue {
   user: User | null;
   token: string | null;
   loading: boolean;
+  features: RuntimeFeatures;
   login: (username: string, password: string) => Promise<LoginResult>;
   completeMfaLogin: (mfaToken: string, code: string, trustDevice?: boolean) => Promise<void>;
   logout: () => void;
@@ -32,6 +39,11 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+function parseFeatures(raw: unknown): RuntimeFeatures {
+  const moonlight = Boolean((raw as { moonlight?: unknown } | undefined)?.moonlight);
+  return { moonlight };
+}
 
 async function apiFetch(path: string, options?: RequestInit) {
   const res = await fetch(`/api/v1${path}`, {
@@ -75,6 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [features, setFeatures] = useState<RuntimeFeatures>(FEATURES_OFF);
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
   const [idleWarnSecondsLeft, setIdleWarnSecondsLeft] = useState<number | null>(null);
   const [proxyIp, setProxyIp] = useState<string | null>(() => sessionStorage.getItem('gatwy-proxy-ip'));
@@ -96,8 +109,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setNeedsSetup(ns);
         if (!ns) {
           try {
-            const { user: u } = await apiFetch('/auth/me');
+            const { user: u, features: f } = await apiFetch('/auth/me');
             setUser(u);
+            setFeatures(parseFeatures(f));
             setToken('cookie');
           } catch {
             // Not authenticated — that's fine
@@ -146,7 +160,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await apiFetch('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ username, password }),
-    }) as { token?: string; user?: User; mfaRequired?: boolean; mfaToken?: string; mfaMethod?: 'totp' | 'passkey'; proxyIp?: string };
+    }) as { token?: string; user?: User; features?: RuntimeFeatures; mfaRequired?: boolean; mfaToken?: string; mfaMethod?: 'totp' | 'passkey'; proxyIp?: string };
 
     if (data.mfaRequired) {
       return { mfaRequired: true, mfaToken: data.mfaToken, mfaMethod: data.mfaMethod };
@@ -160,6 +174,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const u = data.user!;
     setToken('cookie');
     setUser(u);
+    setFeatures(parseFeatures(data.features));
     setNeedsSetup(false);
     return { proxyIp: data.proxyIp };
   }, []);
@@ -168,7 +183,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await apiFetch('/auth/login/mfa', {
       method: 'POST',
       body: JSON.stringify({ mfaToken, code, trustDevice: !!trustDevice }),
-    }) as { token: string; user: User; proxyIp?: string };
+    }) as { token: string; user: User; features?: RuntimeFeatures; proxyIp?: string };
 
     if (data.proxyIp) {
       sessionStorage.setItem('gatwy-proxy-ip', data.proxyIp);
@@ -177,6 +192,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     setToken('cookie');
     setUser(data.user);
+    setFeatures(parseFeatures(data.features));
     setNeedsSetup(false);
   }, []);
 
@@ -186,6 +202,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     sessionStorage.clear();
     setToken(null);
     setUser(null);
+    setFeatures(FEATURES_OFF);
     setProxyIp(null);
     setIdleWarnSecondsLeft(null);
     // Revoke the session on the server (fire-and-forget — UI clears immediately)
@@ -277,24 +294,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setup = useCallback(async (username: string, password: string, displayName: string) => {
-    const { user: u } = await apiFetch('/auth/setup', {
+    const { user: u, features: f } = await apiFetch('/auth/setup', {
       method: 'POST',
       body: JSON.stringify({ username, password, displayName }),
     });
     setToken('cookie');
     setUser(u);
+    setFeatures(parseFeatures(f));
     setNeedsSetup(false);
   }, []);
 
   const refreshUser = useCallback(async () => {
     try {
-      const { user: u } = await apiFetch('/auth/me') as { user: User };
+      const { user: u, features: f } = await apiFetch('/auth/me') as { user: User; features?: RuntimeFeatures };
       setUser(u);
+      setFeatures(parseFeatures(f));
     } catch { /* ignore */ }
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, completeMfaLogin, logout, setup, needsSetup, refreshUser, proxyIp, clearProxyIp }}>
+    <AuthContext.Provider value={{ user, token, loading, features, login, completeMfaLogin, logout, setup, needsSetup, refreshUser, proxyIp, clearProxyIp }}>
       {children}
       {idleWarnSecondsLeft !== null && (
         <IdleWarningDialog secondsLeft={idleWarnSecondsLeft} onStayActive={handleStayActive} />
