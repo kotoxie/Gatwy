@@ -359,6 +359,32 @@ export function AuditTrail() {
         </button>
       </div>
 
+      {/* Top pagination */}
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-text-secondary text-xs">
+          {pagination.total} entries total
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => handlePageChange(pagination.page - 1)}
+            disabled={pagination.page <= 1}
+            className="px-3 py-1 border border-border rounded text-text-secondary hover:bg-surface-hover disabled:opacity-40 disabled:cursor-not-allowed text-xs"
+          >
+            Previous
+          </button>
+          <span className="text-text-secondary text-xs">
+            Page {pagination.page} of {pagination.totalPages}
+          </span>
+          <button
+            onClick={() => handlePageChange(pagination.page + 1)}
+            disabled={pagination.page >= pagination.totalPages}
+            className="px-3 py-1 border border-border rounded text-text-secondary hover:bg-surface-hover disabled:opacity-40 disabled:cursor-not-allowed text-xs"
+          >
+            Next
+          </button>
+        </div>
+      </div>
+
       {/* Table */}
       <div className="overflow-x-auto border border-border rounded-lg">
         <table className="w-full text-sm">
