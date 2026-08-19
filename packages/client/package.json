@@ -1,6 +1,5 @@
 {
   "name": "@gatwy/client",
-  "version": "0.18.3",
   "private": true,
   "engines": {
     "node": ">=22"
