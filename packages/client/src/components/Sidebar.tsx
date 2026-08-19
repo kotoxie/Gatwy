@@ -235,6 +235,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
   const [deleteFolderConfirm, setDeleteFolderConfirm] = useState<{ group: ConnectionGroup; connCount: number } | null>(null);
   const [showExportConfirm, setShowExportConfirm] = useState(false);
   const [importResult, setImportResult] = useState<{ connectionsCreated: number; groupsCreated: number } | { error: string } | null>(null);
+  const [showSearch, setShowSearch] = useState(false);
   const inlineNewGroupInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const folderMenuRef = useRef<HTMLDivElement>(null);
@@ -1059,127 +1060,145 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
             + New Connection
           </button>
 
-          <button
-            onClick={() => startInlineNewFolder(null)}
-            className="w-full py-1 px-3 text-sm border border-border rounded text-text-secondary hover:bg-surface-hover flex items-center gap-1.5"
-          >
-            <FolderIcon />
-            + New Folder
-          </button>
-
-          {/* Import/Export row */}
+          {/* New Folder + Export + Import + Search — icon-only row */}
           <div className="flex gap-1">
             <button
-              onClick={() => setShowExportConfirm(true)}
-              className="flex-1 py-1 px-2 text-xs border border-border rounded text-text-secondary hover:bg-surface-hover flex items-center justify-center gap-1"
-              title="Export connections to JSON"
+              onClick={() => startInlineNewFolder(null)}
+              className="flex-1 py-1.5 border border-border rounded text-text-secondary hover:bg-surface-hover flex items-center justify-center"
+              title="New Folder"
             >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <FolderIcon size={13} />
+            </button>
+            <button
+              onClick={() => setShowExportConfirm(true)}
+              className="flex-1 py-1.5 border border-border rounded text-text-secondary hover:bg-surface-hover flex items-center justify-center"
+              title="Export connections"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                 <polyline points="7 10 12 15 17 10" />
                 <line x1="12" y1="15" x2="12" y2="3" />
               </svg>
-              Export
             </button>
-            <label className="flex-1 py-1 px-2 text-xs border border-border rounded text-text-secondary hover:bg-surface-hover flex items-center justify-center gap-1 cursor-pointer">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <label
+              className="flex-1 py-1.5 border border-border rounded text-text-secondary hover:bg-surface-hover flex items-center justify-center cursor-pointer"
+              title="Import connections"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                 <polyline points="17 8 12 3 7 8" />
                 <line x1="12" y1="3" x2="12" y2="15" />
               </svg>
-              Import
               <input type="file" accept=".json" className="hidden" onChange={handleImport} />
             </label>
-          </div>
-
-          {/* Search bar + Tag filter button */}
-          <div className="flex gap-1 items-center">
-            <div className="relative flex-1">
-              <svg className="absolute left-2 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <button
+              onClick={() => { setShowSearch(v => !v); if (showSearch) setSearchQuery(''); }}
+              className={`flex-1 py-1.5 border rounded flex items-center justify-center transition-colors ${
+                showSearch
+                  ? 'bg-accent/15 border-accent/40 text-accent'
+                  : 'border-border text-text-secondary hover:bg-surface-hover'
+              }`}
+              title={showSearch ? 'Close search' : 'Search connections'}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
               </svg>
-              <input
-                ref={searchRef}
-                type="text"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Escape') setSearchQuery(''); }}
-                placeholder="Find connection..."
-                className="w-full pl-7 pr-6 py-1 text-xs bg-surface border border-border rounded text-text-primary placeholder:text-text-secondary focus:outline-hidden focus:border-accent"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => { setSearchQuery(''); searchRef.current?.focus(); }}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
-                  tabIndex={-1}
-                >
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
-              )}
-            </div>
+            </button>
+          </div>
 
-            {/* Tag filter button — only shown when tags exist */}
-            {allTags.length > 0 && (
-              <div className="relative" ref={tagDropdownRef}>
-                <button
-                  type="button"
-                  title="Filter by tag"
-                  onClick={() => setShowTagDropdown(v => !v)}
-                  className={`flex items-center gap-1 px-2 py-1 rounded border text-xs transition-colors ${
-                    selectedTags.size > 0
-                      ? 'bg-accent/15 border-accent/40 text-accent'
-                      : 'bg-surface border-border text-text-secondary hover:bg-surface-hover'
-                  }`}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
-                    <line x1="7" y1="7" x2="7.01" y2="7"/>
-                  </svg>
-                  {selectedTags.size > 0 && <span className="font-medium">{selectedTags.size}</span>}
-                </button>
-
-                {showTagDropdown && (
-                  <div className="absolute right-0 top-full mt-1 z-50 bg-surface-alt border border-border rounded shadow-lg py-1 min-w-[140px] max-h-60 overflow-y-auto">
-                    <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-text-secondary select-none">Filter by tag</div>
-                    {allTags.map((tag) => {
-                      const active = selectedTags.has(tag);
-                      return (
-                        <button
-                          key={tag}
-                          type="button"
-                          onClick={() => setSelectedTags(prev => {
-                            const next = new Set(prev);
-                            if (next.has(tag)) next.delete(tag); else next.add(tag);
-                            return next;
-                          })}
-                          className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-surface-hover"
-                        >
-                          <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${active ? 'bg-accent border-accent' : 'border-border'}`}>
-                            {active && <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="white" strokeWidth="2.5"><polyline points="2 6 5 9 10 3"/></svg>}
-                          </span>
-                          <span className={active ? 'text-text-primary' : 'text-text-secondary'}>{tag}</span>
-                        </button>
-                      );
-                    })}
-                    {selectedTags.size > 0 && (
-                      <>
-                        <div className="border-t border-border my-1" />
-                        <button
-                          type="button"
-                          onClick={() => { setSelectedTags(new Set()); setShowTagDropdown(false); }}
-                          className="w-full px-3 py-1.5 text-xs text-left text-red-400 hover:bg-surface-hover"
-                        >
-                          Clear all
-                        </button>
-                      </>
-                    )}
-                  </div>
+          {/* Expanded search bar — visible when toggled */}
+          {showSearch && (
+            <div className="flex gap-1 items-center">
+              <div className="relative flex-1">
+                <svg className="absolute left-2 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input
+                  ref={searchRef}
+                  autoFocus
+                  type="text"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Escape') { setSearchQuery(''); setShowSearch(false); }
+                  }}
+                  placeholder="Find connection..."
+                  className="w-full pl-7 pr-6 py-1 text-xs bg-surface border border-border rounded text-text-primary placeholder:text-text-secondary focus:outline-hidden focus:border-accent"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => { setSearchQuery(''); searchRef.current?.focus(); }}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
+                    tabIndex={-1}
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
                 )}
               </div>
-            )}
-          </div>
+
+              {/* Tag filter button — only shown when tags exist */}
+              {allTags.length > 0 && (
+                <div className="relative" ref={tagDropdownRef}>
+                  <button
+                    type="button"
+                    title="Filter by tag"
+                    onClick={() => setShowTagDropdown(v => !v)}
+                    className={`flex items-center gap-1 px-2 py-1 rounded border text-xs transition-colors ${
+                      selectedTags.size > 0
+                        ? 'bg-accent/15 border-accent/40 text-accent'
+                        : 'bg-surface border-border text-text-secondary hover:bg-surface-hover'
+                    }`}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
+                      <line x1="7" y1="7" x2="7.01" y2="7"/>
+                    </svg>
+                    {selectedTags.size > 0 && <span className="font-medium">{selectedTags.size}</span>}
+                  </button>
+
+                  {showTagDropdown && (
+                    <div className="absolute right-0 top-full mt-1 z-50 bg-surface-alt border border-border rounded shadow-lg py-1 min-w-[140px] max-h-60 overflow-y-auto">
+                      <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-text-secondary select-none">Filter by tag</div>
+                      {allTags.map((tag) => {
+                        const active = selectedTags.has(tag);
+                        return (
+                          <button
+                            key={tag}
+                            type="button"
+                            onClick={() => setSelectedTags(prev => {
+                              const next = new Set(prev);
+                              if (next.has(tag)) next.delete(tag); else next.add(tag);
+                              return next;
+                            })}
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-surface-hover"
+                          >
+                            <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${active ? 'bg-accent border-accent' : 'border-border'}`}>
+                              {active && <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="white" strokeWidth="2.5"><polyline points="2 6 5 9 10 3"/></svg>}
+                            </span>
+                            <span className={active ? 'text-text-primary' : 'text-text-secondary'}>{tag}</span>
+                          </button>
+                        );
+                      })}
+                      {selectedTags.size > 0 && (
+                        <>
+                          <div className="border-t border-border my-1" />
+                          <button
+                            type="button"
+                            onClick={() => { setSelectedTags(new Set()); setShowTagDropdown(false); }}
+                            className="w-full px-3 py-1.5 text-xs text-left text-red-400 hover:bg-surface-hover"
+                          >
+                            Clear all
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Connection list */}
