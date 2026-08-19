@@ -488,6 +488,21 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
           </div>
 
           {protocol === 'ssh' && (
+            <div>
+              <label className="block text-xs font-medium text-text-secondary mb-1">
+                Private Key <span className="font-normal">(optional, overrides password)</span>
+              </label>
+              <textarea
+                value={privateKey}
+                onChange={(e) => setPrivateKey(e.target.value)}
+                rows={3}
+                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent font-mono text-xs resize-none"
+              />
+            </div>
+          )}
+
+          {protocol === 'ssh' && (
             <div
               className={`flex items-center gap-2.5 px-3 py-2 rounded border cursor-pointer transition-colors ${
                 promptOnConnect
