@@ -183,13 +183,19 @@ export class CommandTracker {
     // Step 3: detect next prompt or password prompt in the output tail
     const tail = (this.pendingCommand !== null ? this.outputBuf : data).slice(-400);
     const lastLine = tail.split('\n').pop() || '';
+    // Strip ANSI CSI and OSC sequences before regex matching — shells like Kali zsh
+    // wrap the prompt character in color codes (e.g. \x1b[34m$\x1b[0m), which would
+    // otherwise prevent PROMPT_RE from seeing the trailing $ / #.
+    const strippedLastLine = lastLine
+      .replace(/\x1B\[[0-9;]*[A-Za-z]/g, '')   // CSI sequences
+      .replace(/\x1B\][^\x07]*\x07/g, '');       // OSC sequences (e.g. window title)
 
-    if (PASSWORD_PROMPT_RE.test(lastLine)) {
+    if (PASSWORD_PROMPT_RE.test(strippedLastLine)) {
       this.awaitingPassword = true;
       return;
     }
 
-    if (PROMPT_RE.test(lastLine)) {
+    if (PROMPT_RE.test(strippedLastLine)) {
       if (!this.seenFirstPrompt) {
         this.seenFirstPrompt = true;
         this.waitingForCommand = true;
