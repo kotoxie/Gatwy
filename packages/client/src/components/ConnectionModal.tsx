@@ -483,7 +483,9 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
                 disabled={protocol === 'ssh' && promptOnConnect}
                 placeholder={protocol === 'ssh' && promptOnConnect ? 'Prompted at connect time' : connection ? '(unchanged)' : ''}
                 className={`w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent${protocol === 'ssh' && promptOnConnect ? ' opacity-40 cursor-not-allowed' : ''}`}
-          )}
+              />
+            </div>
+          </div>
 
           {protocol === 'ssh' && (
             <div
