@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, type FormEvent } from 'react';
 import { DisconnectOverlay } from './DisconnectOverlay';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -39,6 +39,10 @@ export function SshSession({ tab, isActive, paneWidth, paneHeight, onStatusChang
   const [disconnectMessage, setDisconnectMessage] = useState('');
   const [reconnectCount, setReconnectCount] = useState(0);
   const [activeTunnels, setActiveTunnels] = useState<TunnelInfo[]>([]);
+  const [promptState, setPromptState] = useState<'loading' | 'needed' | 'ready'>('loading');
+  const [promptInput, setPromptInput] = useState('');
+  const promptOnConnectRef = useRef(false);
+  const oneTimePasswordRef = useRef('');
 
   // Destructure per-user SSH prefs (fetched from /api/v1/profile/ssh-prefs)
   const { fontSize: sshFontSize, fontFamily: sshFontFamily, scrollback: sshScrollback,
@@ -50,8 +54,35 @@ export function SshSession({ tab, isActive, paneWidth, paneHeight, onStatusChang
     setDisconnected(false);
     setDisconnectMessage('');
     setActiveTunnels([]);
+    if (promptOnConnectRef.current) {
+      oneTimePasswordRef.current = '';
+      setPromptInput('');
+      setPromptState('needed');
+    }
     setReconnectCount((n) => n + 1);
   }, []);
+
+  // Fetch connection config once to check promptOnConnect flag
+  useEffect(() => {
+    fetch(`/api/v1/connections/${tab.connectionId}`, { credentials: 'include' })
+      .then((r) => r.json())
+      .then((d: { extraConfig?: { promptOnConnect?: boolean } }) => {
+        if (d.extraConfig?.promptOnConnect) {
+          promptOnConnectRef.current = true;
+          setPromptState('needed');
+        } else {
+          setPromptState('ready');
+        }
+      })
+      .catch(() => setPromptState('ready'));
+  }, [tab.connectionId]);
+
+  const handlePromptSubmit = useCallback((e: FormEvent) => {
+    e.preventDefault();
+    oneTimePasswordRef.current = promptInput;
+    setPromptInput('');
+    setPromptState('ready');
+  }, [promptInput]);
 
   // Re-fit when the pane rect changes (sidebar drag, window resize, split pane resize).
   // paneWidth/paneHeight come directly from React state (leafRects), so this fires
@@ -86,7 +117,7 @@ export function SshSession({ tab, isActive, paneWidth, paneHeight, onStatusChang
   }, [isActive]);
 
   useEffect(() => {
-    if (!termRef.current || !token || sshPrefsLoading) return;
+    if (!termRef.current || !token || sshPrefsLoading || promptState !== 'ready') return;
     let cancelled = false;
 
     const term = new Terminal({
@@ -151,6 +182,9 @@ export function SshSession({ tab, isActive, paneWidth, paneHeight, onStatusChang
       wsRef.current = ws;
 
       ws.onopen = () => {
+        if (oneTimePasswordRef.current) {
+          ws.send(JSON.stringify({ type: 'auth', password: oneTimePasswordRef.current }));
+        }
         // By the time the WebSocket handshake completes the fit has run
         ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
       };
@@ -206,7 +240,7 @@ export function SshSession({ tab, isActive, paneWidth, paneHeight, onStatusChang
       fitAddonRef.current = null;
       wsRef.current = null;
     };
-  }, [tab.id, tab.connectionId, token, onStatusChange, reconnectCount, sshFontSize, sshFontFamily, sshScrollback, sshCursorStyle, sshCursorBlink, sshThemeName, sshPrefsLoading]);
+  }, [tab.id, tab.connectionId, token, onStatusChange, reconnectCount, promptState, sshFontSize, sshFontFamily, sshScrollback, sshCursorStyle, sshCursorBlink, sshThemeName, sshPrefsLoading]);
 
   // Re-fit when the tunnels bar appears or disappears so xterm recalculates
   // its available height (flex-1 container shrinks/grows accordingly).
@@ -238,6 +272,44 @@ export function SshSession({ tab, isActive, paneWidth, paneHeight, onStatusChang
       }}
     >
       <div ref={termRef} className="flex-1 min-h-0" />
+
+      {promptState === 'needed' && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/80">
+          <form
+            onSubmit={handlePromptSubmit}
+            className="bg-surface border border-border rounded-lg p-5 w-72 flex flex-col gap-3 shadow-xl"
+          >
+            <div>
+              <p className="text-sm font-semibold text-text-primary mb-0.5">Password required</p>
+              <p className="text-xs text-text-secondary truncate">{tab.name}</p>
+            </div>
+            <input
+              type="password"
+              autoFocus
+              value={promptInput}
+              onChange={(e) => setPromptInput(e.target.value)}
+              placeholder="Enter password"
+              className="w-full px-2.5 py-1.5 bg-[#1a1a1a] border border-border rounded text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => onClose(tab.id)}
+                className="flex-1 px-3 py-1.5 text-xs border border-border text-text-secondary rounded hover:bg-surface-hover transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!promptInput}
+                className="flex-1 px-3 py-1.5 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Connect
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {activeTunnels.length > 0 && (
         <div className="shrink-0 bg-black/80 border-t border-border/30 px-3 py-1.5 flex items-center gap-3 flex-wrap">

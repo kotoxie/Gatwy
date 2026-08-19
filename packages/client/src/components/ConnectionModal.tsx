@@ -211,6 +211,7 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
   const [selectedShareRoles, setSelectedShareRoles] = useState<string[]>([]);
   const [selectedShareUsers, setSelectedShareUsers] = useState<string[]>([]);
   const [skipCertValidation, setSkipCertValidation] = useState(true);
+  const [promptOnConnect, setPromptOnConnect] = useState(false);
   const newFolderInputRef = useRef<HTMLInputElement>(null);
 
   // Load full details when editing an existing connection
@@ -235,6 +236,7 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
         if (d.extraConfig?.idleTimeoutMinutes) setDbIdleTimeout(String(d.extraConfig.idleTimeoutMinutes));
         if (d.tags && Array.isArray(d.tags)) setTags(d.tags);
         if (d.skipCertValidation !== undefined) setSkipCertValidation(!!d.skipCertValidation);
+        if (d.extraConfig?.promptOnConnect) setPromptOnConnect(true);
         if (d.shares && Array.isArray(d.shares)) {
           setSelectedShareRoles(d.shares.filter((s: { shareType: string }) => s.shareType === 'role').map((s: { targetId: string }) => s.targetId));
           setSelectedShareUsers(d.shares.filter((s: { shareType: string }) => s.shareType === 'user').map((s: { targetId: string }) => s.targetId));
@@ -297,14 +299,15 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
         shared,
         ...(protocol === 'ssh' && privateKey ? { privateKey } : {}),
       };
-      // Only include password if the user typed one
-      if (password) body.password = password;
+      // Only include password if the user typed one and not using prompt-on-connect
+      if (password && !(protocol === 'ssh' && promptOnConnect)) body.password = password;
       if (protocol === 'ssh') {
         body.tunnels = tunnelsClean.map(({ localPort, remoteHost, remotePort }) => ({
           localPort: parseInt(localPort, 10),
           remoteHost,
           remotePort: parseInt(remotePort, 10),
         }));
+        body.extraConfig = promptOnConnect ? { promptOnConnect: true } : null;
       }
       if (protocol === 'smb') {
         body.extraConfig = { share: smbShare.trim(), ...(smbDomain.trim() ? { domain: smbDomain.trim() } : {}) };
@@ -477,24 +480,35 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder={connection ? '(unchanged)' : ''}
-                className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent"
-              />
-            </div>
-          </div>
+                disabled={protocol === 'ssh' && promptOnConnect}
+                placeholder={protocol === 'ssh' && promptOnConnect ? 'Prompted at connect time' : connection ? '(unchanged)' : ''}
+                className={`w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent${protocol === 'ssh' && promptOnConnect ? ' opacity-40 cursor-not-allowed' : ''}`}
+          )}
 
           {protocol === 'ssh' && (
-            <div>
-              <label className="block text-xs font-medium text-text-secondary mb-1">
-                Private Key <span className="font-normal">(optional, overrides password)</span>
-              </label>
-              <textarea
-                value={privateKey}
-                onChange={(e) => setPrivateKey(e.target.value)}
-                rows={3}
-                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
-                className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent font-mono text-xs resize-none"
-              />
+            <div
+              className={`flex items-center gap-2.5 px-3 py-2 rounded border cursor-pointer transition-colors ${
+                promptOnConnect
+                  ? 'border-accent/40 bg-accent/5'
+                  : 'border-border bg-surface hover:bg-surface-hover'
+              }`}
+              onClick={() => {
+                const next = !promptOnConnect;
+                setPromptOnConnect(next);
+                if (next) setPassword('');
+              }}
+            >
+              <div className={`relative w-8 h-[18px] rounded-full transition-colors ${promptOnConnect ? 'bg-accent' : 'bg-zinc-600'}`}>
+                <div className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white transition-transform ${promptOnConnect ? 'left-[16px]' : 'left-[2px]'}`} />
+              </div>
+              <div className="flex-1">
+                <span className="text-xs font-medium text-text-primary">Prompt for password on connect</span>
+                <p className="text-[11px] text-text-secondary mt-0.5 leading-tight">
+                  {promptOnConnect
+                    ? 'Password will be requested each time a session opens — suitable for 2FA or one-time passwords.'
+                    : 'Use a stored password or private key for authentication.'}
+                </p>
+              </div>
             </div>
           )}
 

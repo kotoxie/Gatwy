@@ -36,6 +36,7 @@ interface ConnectionRow {
   recording_enabled: number;
   tunnels_json: string | null;
   host_fingerprint: string | null;
+  extra_config_json: string | null;
 }
 
 interface TunnelConfig { localPort: number; remoteHost: string; remotePort: number; }
@@ -196,19 +197,7 @@ export function setupSshProxy(server: https.Server): void {
     let castStart = 0;
 
     const ssh = new SshClient();
-    // Start with sane defaults. The client sends a resize message immediately on
-    // ws.open, but wireClientWs isn't attached yet at that point — so we capture
-    // it here with a temporary listener and update cols/rows before the shell opens.
     let cols = 80, rows = 24;
-    ws.once('message', (msg: Buffer | string) => {
-      try {
-        const json = JSON.parse(typeof msg === 'string' ? msg : msg.toString('utf8'));
-        if (json.type === 'resize' && json.cols > 0 && json.rows > 0) {
-          cols = json.cols;
-          rows = json.rows;
-        }
-      } catch { /* not a resize — ignore */ }
-    });
 
     ssh.on('banner', (message: string) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(Buffer.from(message));
@@ -343,6 +332,10 @@ export function setupSshProxy(server: https.Server): void {
       }
     });
 
+    let extraCfg: Record<string, unknown> = {};
+    try { if (conn.extra_config_json) extraCfg = JSON.parse(conn.extra_config_json) as Record<string, unknown>; } catch { /* ignore */ }
+    const promptOnConnect = extraCfg.promptOnConnect === true;
+
     const password = conn.encrypted_password
       ? (() => { try { return decrypt(conn.encrypted_password!); } catch { return undefined; } })()
       : undefined;
@@ -350,21 +343,71 @@ export function setupSshProxy(server: https.Server): void {
       ? (() => { try { return decrypt(conn.private_key!); } catch { return undefined; } })()
       : undefined;
 
-    ssh.connect({
-      host: conn.host, port: conn.port,
-      username: conn.username || '',
-      ...(privateKey ? { privateKey } : { password }),
-      readyTimeout: 15000,
-      hostVerifier: (key: Buffer) => {
-        const fingerprint = crypto.createHash('sha256').update(key).digest('hex');
-        if (conn.host_fingerprint) {
-          // Verify stored fingerprint matches (prevent MITM after first connect)
-          return conn.host_fingerprint === fingerprint;
+    const hostVerifier = (key: Buffer): boolean => {
+      const fingerprint = crypto.createHash('sha256').update(key).digest('hex');
+      if (conn.host_fingerprint) {
+        return conn.host_fingerprint === fingerprint;
+      }
+      execute('UPDATE connections SET host_fingerprint = ? WHERE id = ?', [fingerprint, conn.id]);
+      return true;
+    };
+
+    if (promptOnConnect) {
+      const authTimeout = setTimeout(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Authentication timeout' }));
+          ws.close(4007, 'Auth timeout');
         }
-        // Trust On First Use: store fingerprint for future verification
-        execute('UPDATE connections SET host_fingerprint = ? WHERE id = ?', [fingerprint, conn.id]);
-        return true;
-      },
-    });
+      }, 30000);
+
+      ws.once('message', (authMsg: Buffer | string) => {
+        clearTimeout(authTimeout);
+        let oneTimePassword: string | undefined;
+        try {
+          const json = JSON.parse(typeof authMsg === 'string' ? authMsg : authMsg.toString('utf8'));
+          if (json.type !== 'auth' || typeof json.password !== 'string') {
+            if (ws.readyState === WebSocket.OPEN) ws.close(4007, 'Expected auth message');
+            return;
+          }
+          oneTimePassword = json.password;
+        } catch {
+          if (ws.readyState === WebSocket.OPEN) ws.close(4007, 'Expected auth message');
+          return;
+        }
+        ws.once('message', (resizeMsg: Buffer | string) => {
+          try {
+            const json = JSON.parse(typeof resizeMsg === 'string' ? resizeMsg : resizeMsg.toString('utf8'));
+            if (json.type === 'resize' && json.cols > 0 && json.rows > 0) {
+              cols = json.cols;
+              rows = json.rows;
+            }
+          } catch { /* use defaults */ }
+          ssh.connect({
+            host: conn.host, port: conn.port,
+            username: conn.username || '',
+            password: oneTimePassword,
+            readyTimeout: 15000,
+            hostVerifier,
+          });
+        });
+      });
+    } else {
+      ws.once('message', (msg: Buffer | string) => {
+        try {
+          const json = JSON.parse(typeof msg === 'string' ? msg : msg.toString('utf8'));
+          if (json.type === 'resize' && json.cols > 0 && json.rows > 0) {
+            cols = json.cols;
+            rows = json.rows;
+          }
+        } catch { /* not a resize — ignore */ }
+      });
+      ssh.connect({
+        host: conn.host, port: conn.port,
+        username: conn.username || '',
+        ...(privateKey ? { privateKey } : { password }),
+        readyTimeout: 15000,
+        hostVerifier,
+      });
+    }
   });
 }
