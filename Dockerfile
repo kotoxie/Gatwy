@@ -8,8 +8,8 @@ COPY package.json package-lock.json* ./
 COPY packages/server/package.json packages/server/
 COPY packages/client/package.json packages/client/
 
-# Install all dependencies
-RUN npm install
+# Install all dependencies (--ignore-scripts skips native compilation, safe for TS build stage)
+RUN npm install --ignore-scripts
 
 # Copy source
 COPY tsconfig.base.json ./
@@ -32,7 +32,8 @@ RUN apk add --no-cache ca-certificates curl su-exec openssl
 COPY package.json package-lock.json* ./
 COPY packages/server/package.json packages/server/
 COPY packages/client/package.json packages/client/
-RUN npm install --omit=dev --workspace=packages/server
+# cpu-features (ssh2 optional dep) skipped — ssh2 works without it; avoids hours of QEMU ARM64 compilation
+RUN npm install --omit=dev --ignore-scripts --workspace=packages/server
 
 # Copy built server
 COPY --from=builder /app/packages/server/dist packages/server/dist/
