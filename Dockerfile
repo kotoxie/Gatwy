@@ -1,5 +1,5 @@
-# Stage 1: Build
-FROM node:22-alpine AS builder
+# Stage 1: Build — always runs on the host's native platform so tsc/vite aren't QEMU-emulated
+FROM --platform=$BUILDPLATFORM node:22-alpine AS builder
 
 WORKDIR /app
 
