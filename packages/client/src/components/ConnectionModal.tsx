@@ -324,7 +324,7 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
       if (protocol === 'rdp') {
         body.skipCertValidation = skipCertValidation;
       }
-      if (tags.length > 0) body.tags = tags;
+      body.tags = tags;
       const url = connection ? `/api/v1/connections/${connection.id}` : '/api/v1/connections';
       const method = connection ? 'PUT' : 'POST';
       const res = await fetch(url, {
@@ -786,7 +786,7 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ',') {
                   e.preventDefault();
-                  const val = tagInput.trim().toLowerCase();
+                  const val = tagInput.trim();
                   if (val && !tags.includes(val)) setTags([...tags, val]);
                   setTagInput('');
                 } else if (e.key === 'Backspace' && !tagInput && tags.length > 0) {

@@ -289,7 +289,7 @@ router.post('/', (req: Request, res: Response) => {
   const id = uuid();
   const encryptedPassword = password ? encrypt(password) : null;
   const encryptedKey = privateKey ? encrypt(privateKey) : null;
-  const tagsStr = Array.isArray(tags) ? JSON.stringify(tags.map((t: string) => t.trim().toLowerCase()).filter(Boolean)) : null;
+  const tagsStr = Array.isArray(tags) ? JSON.stringify(tags.map((t: string) => t.trim()).filter(Boolean)) : null;
 
   execute(
     `INSERT INTO connections (id, user_id, group_id, name, protocol, host, port, username, encrypted_password, private_key, extra_config_json, sort_order, shared, tunnels_json, tags, skip_cert_validation)
@@ -397,7 +397,7 @@ router.put('/:id', (req: Request, res: Response) => {
   if (shared !== undefined) { updates.push('shared = ?'); params.push(shared ? 1 : 0); }
   if (tunnels !== undefined) { updates.push('tunnels_json = ?'); params.push(tunnels ? JSON.stringify(tunnels) : null); }
   if (extraConfig !== undefined) { updates.push('extra_config_json = ?'); params.push(extraConfig ? JSON.stringify(extraConfig) : null); }
-  if (tags !== undefined) { updates.push('tags = ?'); params.push(Array.isArray(tags) ? JSON.stringify(tags.map((t: string) => t.trim().toLowerCase()).filter(Boolean)) : null); }
+  if (tags !== undefined) { updates.push('tags = ?'); params.push(Array.isArray(tags) ? JSON.stringify(tags.map((t: string) => t.trim()).filter(Boolean)) : null); }
   if (skipCertValidation !== undefined) { updates.push('skip_cert_validation = ?'); params.push(skipCertValidation ? 1 : 0); }
 
   if (updates.length === 0) {
