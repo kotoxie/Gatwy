@@ -26,10 +26,7 @@ export interface ConnectionPrefill {
   smbShare: string;
   smbDomain: string;
   tunnels: TunnelDef[];
-  pointerScaleX?: string;
-  pointerScaleY?: string;
-  pointerOffsetX?: string;
-  pointerOffsetY?: string;
+  vncDesktopScale?: string;
 }
 
 interface ConnectionModalProps {
@@ -42,6 +39,24 @@ interface ConnectionModalProps {
 }
 
 interface TunnelDef { id: string; localPort: string; remoteHost: string; remotePort: string; }
+
+/** Common remote desktop scaling (Windows / macOS / GNOME / KDE). */
+const VNC_DESKTOP_SCALES = [100, 125, 150, 175, 200, 225, 250, 300] as const;
+
+function nearestVncDesktopScale(factor: number): string {
+  if (!Number.isFinite(factor) || factor <= 0 || factor === 1) return '100';
+  const pct = 100 / factor;
+  let best: (typeof VNC_DESKTOP_SCALES)[number] = 100;
+  let bestDist = Infinity;
+  for (const option of VNC_DESKTOP_SCALES) {
+    const dist = Math.abs(option - pct);
+    if (dist < bestDist) {
+      best = option;
+      bestDist = dist;
+    }
+  }
+  return String(best);
+}
 
 const defaultPorts: Record<string, number> = {
   ssh: 22,
@@ -201,10 +216,7 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
   const [tunnels, setTunnels] = useState<TunnelDef[]>(prefill?.tunnels ?? []);
   const [smbShare, setSmbShare] = useState(prefill?.smbShare ?? '');
   const [smbDomain, setSmbDomain] = useState(prefill?.smbDomain ?? '');
-  const [vncScaleX, setVncScaleX] = useState(prefill?.pointerScaleX ?? '');
-  const [vncScaleY, setVncScaleY] = useState(prefill?.pointerScaleY ?? '');
-  const [vncOffX, setVncOffX] = useState(prefill?.pointerOffsetX ?? '');
-  const [vncOffY, setVncOffY] = useState(prefill?.pointerOffsetY ?? '');
+  const [vncDesktopScale, setVncDesktopScale] = useState(prefill?.vncDesktopScale ?? '100');
   // DB-specific fields
   const [dbDatabase, setDbDatabase] = useState('');
   const [dbSslMode, setDbSslMode] = useState<'disable' | 'require' | 'verify-ca' | 'verify-full'>('disable');
@@ -245,10 +257,9 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
         if (d.tags && Array.isArray(d.tags)) setTags(d.tags);
         if (d.skipCertValidation !== undefined) setSkipCertValidation(!!d.skipCertValidation);
         if (d.extraConfig?.promptOnConnect) setPromptOnConnect(true);
-        if (d.extraConfig?.pointerScaleX != null && d.extraConfig.pointerScaleX !== 1) setVncScaleX(String(d.extraConfig.pointerScaleX));
-        if (d.extraConfig?.pointerScaleY != null && d.extraConfig.pointerScaleY !== 1) setVncScaleY(String(d.extraConfig.pointerScaleY));
-        if (d.extraConfig?.pointerOffsetX) setVncOffX(String(d.extraConfig.pointerOffsetX));
-        if (d.extraConfig?.pointerOffsetY) setVncOffY(String(d.extraConfig.pointerOffsetY));
+        {
+          setVncDesktopScale(nearestVncDesktopScale(Number(d.extraConfig?.pointerScaleX ?? 1)));
+        }
         if (d.shares && Array.isArray(d.shares)) {
           setSelectedShareRoles(d.shares.filter((s: { shareType: string }) => s.shareType === 'role').map((s: { targetId: string }) => s.targetId));
           setSelectedShareUsers(d.shares.filter((s: { shareType: string }) => s.shareType === 'user').map((s: { targetId: string }) => s.targetId));
@@ -334,21 +345,13 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
         body.extraConfig = dbCfg;
       }
       if (protocol === 'vnc') {
-        const vncCfg: Record<string, number> = {};
-        const sx = vncScaleX.trim() === '' ? 1 : Number(vncScaleX);
-        const sy = vncScaleY.trim() === '' ? 1 : Number(vncScaleY);
-        const ox = vncOffX.trim() === '' ? 0 : Number(vncOffX);
-        const oy = vncOffY.trim() === '' ? 0 : Number(vncOffY);
-        if (![sx, sy, ox, oy].every((n) => Number.isFinite(n))) {
-          setError('VNC pointer scale/offset must be numbers');
-          setSaving(false);
-          return;
+        const pct = parseInt(vncDesktopScale, 10) || 100;
+        if (pct === 100) {
+          body.extraConfig = null;
+        } else {
+          const factor = 100 / pct;
+          body.extraConfig = { pointerScaleX: factor, pointerScaleY: factor };
         }
-        if (sx !== 1) vncCfg.pointerScaleX = sx;
-        if (sy !== 1) vncCfg.pointerScaleY = sy;
-        if (ox !== 0) vncCfg.pointerOffsetX = ox;
-        if (oy !== 0) vncCfg.pointerOffsetY = oy;
-        body.extraConfig = Object.keys(vncCfg).length ? vncCfg : null;
       }
       if (protocol === 'rdp') {
         body.skipCertValidation = skipCertValidation;
@@ -730,60 +733,22 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
           )}
 
           {protocol === 'vnc' && (
-            <div className="space-y-2">
-              <div>
-                <label className="block text-xs font-medium text-text-secondary mb-1">Pointer mapping</label>
-                <p className="text-[11px] text-text-secondary mb-1.5 leading-tight">
-                  Leave blank unless the remote cursor sits off the VNC picture (HiDPI / fractional desktop scale).
-                  Sent as <span className="font-mono">x × scaleX + offsetX</span>. Example: scale 0.606 for a 4K capture of a 1.65-scaled desktop.
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <label className="block text-[11px] text-text-secondary mb-1">Scale X</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={vncScaleX}
-                    onChange={(e) => setVncScaleX(e.target.value)}
-                    placeholder="1"
-                    className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent font-mono"
-                  />
-                </div>
-                <div className="flex-1">
-                  <label className="block text-[11px] text-text-secondary mb-1">Scale Y</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={vncScaleY}
-                    onChange={(e) => setVncScaleY(e.target.value)}
-                    placeholder="1"
-                    className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent font-mono"
-                  />
-                </div>
-                <div className="flex-1">
-                  <label className="block text-[11px] text-text-secondary mb-1">Offset X</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={vncOffX}
-                    onChange={(e) => setVncOffX(e.target.value)}
-                    placeholder="0"
-                    className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent font-mono"
-                  />
-                </div>
-                <div className="flex-1">
-                  <label className="block text-[11px] text-text-secondary mb-1">Offset Y</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={vncOffY}
-                    onChange={(e) => setVncOffY(e.target.value)}
-                    placeholder="0"
-                    className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent font-mono"
-                  />
-                </div>
-              </div>
+            <div>
+              <label className="block text-xs font-medium text-text-secondary mb-1">Remote display scale</label>
+              <select
+                value={vncDesktopScale}
+                onChange={(e) => setVncDesktopScale(e.target.value)}
+                className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent"
+              >
+                {VNC_DESKTOP_SCALES.map((pct) => (
+                  <option key={pct} value={String(pct)}>
+                    {pct === 100 ? '100% (default)' : `${pct}%`}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-text-secondary mt-1 leading-tight">
+                Match the scaling set on the remote desktop. Use this if the mouse is not lined up with what you see.
+              </p>
             </div>
           )}
 

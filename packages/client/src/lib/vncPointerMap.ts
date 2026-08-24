@@ -1,15 +1,9 @@
-/** Optional per-connection VNC pointer mapping.
+/** Optional per-connection VNC pointer scale.
 
-When a VNC server advertises physical framebuffer pixels but the remote
-desktop's pointer lives in a different (often logical / HiDPI-scaled)
-coordinate space, clicks land in the wrong place. These values remap
-noVNC's framebuffer coordinates before they are sent:
-
-  remoteX = round(vncX * pointerScaleX + pointerOffsetX)
-  remoteY = round(vncY * pointerScaleY + pointerOffsetY)
-
-Defaults (1, 1, 0, 0) are a no-op and must stay that way so ordinary
-VNC hosts are unchanged.
+If the remote desktop is scaled (125%, 150%, 200%, …) but VNC still
+sends the full-resolution picture, the cursor can sit in the wrong place.
+Set pointerScaleX/Y to 100 / desktopScalePercent. Leave at 1 for a
+normal (100%) desktop.
 */
 export type VncPointerMap = {
   pointerScaleX: number;

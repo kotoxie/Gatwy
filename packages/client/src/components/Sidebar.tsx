@@ -481,10 +481,13 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
         shared: d.shared === 1,
         smbShare: d.extraConfig?.share ?? '',
         smbDomain: d.extraConfig?.domain ?? '',
-        pointerScaleX: d.extraConfig?.pointerScaleX != null && d.extraConfig.pointerScaleX !== 1 ? String(d.extraConfig.pointerScaleX) : '',
-        pointerScaleY: d.extraConfig?.pointerScaleY != null && d.extraConfig.pointerScaleY !== 1 ? String(d.extraConfig.pointerScaleY) : '',
-        pointerOffsetX: d.extraConfig?.pointerOffsetX ? String(d.extraConfig.pointerOffsetX) : '',
-        pointerOffsetY: d.extraConfig?.pointerOffsetY ? String(d.extraConfig.pointerOffsetY) : '',
+        vncDesktopScale: (() => {
+          const sx = Number(d.extraConfig?.pointerScaleX ?? 1);
+          if (!Number.isFinite(sx) || sx <= 0 || sx === 1) return '100';
+          const pct = 100 / sx;
+          const options = [100, 125, 150, 175, 200, 225, 250, 300];
+          return String(options.reduce((best, n) => Math.abs(n - pct) < Math.abs(best - pct) ? n : best, 100));
+        })(),
         tunnels: (d.tunnels ?? []).map((t: { localPort: number; remoteHost: string; remotePort: number }) => ({
           id: crypto.randomUUID(),
           localPort: String(t.localPort),
