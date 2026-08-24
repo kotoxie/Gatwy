@@ -26,6 +26,10 @@ export interface ConnectionPrefill {
   smbShare: string;
   smbDomain: string;
   tunnels: TunnelDef[];
+  pointerScaleX?: string;
+  pointerScaleY?: string;
+  pointerOffsetX?: string;
+  pointerOffsetY?: string;
 }
 
 interface ConnectionModalProps {
@@ -197,6 +201,10 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
   const [tunnels, setTunnels] = useState<TunnelDef[]>(prefill?.tunnels ?? []);
   const [smbShare, setSmbShare] = useState(prefill?.smbShare ?? '');
   const [smbDomain, setSmbDomain] = useState(prefill?.smbDomain ?? '');
+  const [vncScaleX, setVncScaleX] = useState(prefill?.pointerScaleX ?? '');
+  const [vncScaleY, setVncScaleY] = useState(prefill?.pointerScaleY ?? '');
+  const [vncOffX, setVncOffX] = useState(prefill?.pointerOffsetX ?? '');
+  const [vncOffY, setVncOffY] = useState(prefill?.pointerOffsetY ?? '');
   // DB-specific fields
   const [dbDatabase, setDbDatabase] = useState('');
   const [dbSslMode, setDbSslMode] = useState<'disable' | 'require' | 'verify-ca' | 'verify-full'>('disable');
@@ -237,6 +245,10 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
         if (d.tags && Array.isArray(d.tags)) setTags(d.tags);
         if (d.skipCertValidation !== undefined) setSkipCertValidation(!!d.skipCertValidation);
         if (d.extraConfig?.promptOnConnect) setPromptOnConnect(true);
+        if (d.extraConfig?.pointerScaleX != null && d.extraConfig.pointerScaleX !== 1) setVncScaleX(String(d.extraConfig.pointerScaleX));
+        if (d.extraConfig?.pointerScaleY != null && d.extraConfig.pointerScaleY !== 1) setVncScaleY(String(d.extraConfig.pointerScaleY));
+        if (d.extraConfig?.pointerOffsetX) setVncOffX(String(d.extraConfig.pointerOffsetX));
+        if (d.extraConfig?.pointerOffsetY) setVncOffY(String(d.extraConfig.pointerOffsetY));
         if (d.shares && Array.isArray(d.shares)) {
           setSelectedShareRoles(d.shares.filter((s: { shareType: string }) => s.shareType === 'role').map((s: { targetId: string }) => s.targetId));
           setSelectedShareUsers(d.shares.filter((s: { shareType: string }) => s.shareType === 'user').map((s: { targetId: string }) => s.targetId));
@@ -320,6 +332,23 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
         if (dbQueryTimeout.trim()) dbCfg.queryTimeout = parseInt(dbQueryTimeout, 10);
         if (dbIdleTimeout.trim()) dbCfg.idleTimeoutMinutes = parseInt(dbIdleTimeout, 10);
         body.extraConfig = dbCfg;
+      }
+      if (protocol === 'vnc') {
+        const vncCfg: Record<string, number> = {};
+        const sx = vncScaleX.trim() === '' ? 1 : Number(vncScaleX);
+        const sy = vncScaleY.trim() === '' ? 1 : Number(vncScaleY);
+        const ox = vncOffX.trim() === '' ? 0 : Number(vncOffX);
+        const oy = vncOffY.trim() === '' ? 0 : Number(vncOffY);
+        if (![sx, sy, ox, oy].every((n) => Number.isFinite(n))) {
+          setError('VNC pointer scale/offset must be numbers');
+          setSaving(false);
+          return;
+        }
+        if (sx !== 1) vncCfg.pointerScaleX = sx;
+        if (sy !== 1) vncCfg.pointerScaleY = sy;
+        if (ox !== 0) vncCfg.pointerOffsetX = ox;
+        if (oy !== 0) vncCfg.pointerOffsetY = oy;
+        body.extraConfig = Object.keys(vncCfg).length ? vncCfg : null;
       }
       if (protocol === 'rdp') {
         body.skipCertValidation = skipCertValidation;
@@ -696,6 +725,64 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
                   placeholder="WORKGROUP"
                   className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent font-mono"
                 />
+              </div>
+            </div>
+          )}
+
+          {protocol === 'vnc' && (
+            <div className="space-y-2">
+              <div>
+                <label className="block text-xs font-medium text-text-secondary mb-1">Pointer mapping</label>
+                <p className="text-[11px] text-text-secondary mb-1.5 leading-tight">
+                  Leave blank unless the remote cursor sits off the VNC picture (HiDPI / fractional desktop scale).
+                  Sent as <span className="font-mono">x × scaleX + offsetX</span>. Example: scale 0.606 for a 4K capture of a 1.65-scaled desktop.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="block text-[11px] text-text-secondary mb-1">Scale X</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={vncScaleX}
+                    onChange={(e) => setVncScaleX(e.target.value)}
+                    placeholder="1"
+                    className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent font-mono"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-[11px] text-text-secondary mb-1">Scale Y</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={vncScaleY}
+                    onChange={(e) => setVncScaleY(e.target.value)}
+                    placeholder="1"
+                    className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent font-mono"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-[11px] text-text-secondary mb-1">Offset X</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={vncOffX}
+                    onChange={(e) => setVncOffX(e.target.value)}
+                    placeholder="0"
+                    className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent font-mono"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-[11px] text-text-secondary mb-1">Offset Y</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={vncOffY}
+                    onChange={(e) => setVncOffY(e.target.value)}
+                    placeholder="0"
+                    className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent font-mono"
+                  />
+                </div>
               </div>
             </div>
           )}

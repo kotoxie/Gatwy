@@ -536,11 +536,15 @@ router.get('/:id/session', (req: Request, res: Response) => {
 
   const password = conn.encrypted_password ? decrypt(conn.encrypted_password) : '';
 
+  let extraConfig: unknown = null;
+  try { if (conn.extra_config_json) extraConfig = JSON.parse(conn.extra_config_json); } catch { /* ignore */ }
+
   res.json({
     host: conn.host,
     port: conn.port,
     username: conn.username || '',
     password,
+    extraConfig,
   });
 });
 
