@@ -484,9 +484,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
         vncDesktopScale: (() => {
           const sx = Number(d.extraConfig?.pointerScaleX ?? 1);
           if (!Number.isFinite(sx) || sx <= 0 || sx === 1) return '100';
-          const pct = 100 / sx;
-          const options = [100, 125, 150, 165, 175, 200, 225, 250, 300];
-          return String(options.reduce((best, n) => Math.abs(n - pct) < Math.abs(best - pct) ? n : best, 100));
+          return String(Math.round(100 / sx));
         })(),
         tunnels: (d.tunnels ?? []).map((t: { localPort: number; remoteHost: string; remotePort: number }) => ({
           id: crypto.randomUUID(),

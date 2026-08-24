@@ -41,21 +41,15 @@ interface ConnectionModalProps {
 interface TunnelDef { id: string; localPort: string; remoteHost: string; remotePort: string; }
 
 /** Common remote desktop scaling (Windows / macOS / GNOME / KDE). */
-const VNC_DESKTOP_SCALES = [100, 125, 150, 165, 175, 200, 225, 250, 300] as const;
+const VNC_DESKTOP_SCALES = [100, 125, 150, 175, 200, 225, 250, 300] as const;
 
-function nearestVncDesktopScale(factor: number): string {
-  if (!Number.isFinite(factor) || factor <= 0 || factor === 1) return '100';
-  const pct = 100 / factor;
-  let best: (typeof VNC_DESKTOP_SCALES)[number] = 100;
-  let bestDist = Infinity;
-  for (const option of VNC_DESKTOP_SCALES) {
-    const dist = Math.abs(option - pct);
-    if (dist < bestDist) {
-      best = option;
-      bestDist = dist;
-    }
-  }
-  return String(best);
+function percentFromPointerScale(factor: number): number {
+  if (!Number.isFinite(factor) || factor <= 0 || factor === 1) return 100;
+  return Math.round(100 / factor);
+}
+
+function choiceForVncPercent(percent: number): string {
+  return (VNC_DESKTOP_SCALES as readonly number[]).includes(percent) ? String(percent) : 'custom';
 }
 
 const defaultPorts: Record<string, number> = {
@@ -216,7 +210,8 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
   const [tunnels, setTunnels] = useState<TunnelDef[]>(prefill?.tunnels ?? []);
   const [smbShare, setSmbShare] = useState(prefill?.smbShare ?? '');
   const [smbDomain, setSmbDomain] = useState(prefill?.smbDomain ?? '');
-  const [vncDesktopScale, setVncDesktopScale] = useState(prefill?.vncDesktopScale ?? '100');
+  const [vncScaleChoice, setVncScaleChoice] = useState(() => choiceForVncPercent(parseInt(prefill?.vncDesktopScale ?? '100', 10) || 100));
+  const [vncCustomScale, setVncCustomScale] = useState(prefill?.vncDesktopScale ?? '165');
   // DB-specific fields
   const [dbDatabase, setDbDatabase] = useState('');
   const [dbSslMode, setDbSslMode] = useState<'disable' | 'require' | 'verify-ca' | 'verify-full'>('disable');
@@ -258,7 +253,9 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
         if (d.skipCertValidation !== undefined) setSkipCertValidation(!!d.skipCertValidation);
         if (d.extraConfig?.promptOnConnect) setPromptOnConnect(true);
         {
-          setVncDesktopScale(nearestVncDesktopScale(Number(d.extraConfig?.pointerScaleX ?? 1)));
+          const pct = percentFromPointerScale(Number(d.extraConfig?.pointerScaleX ?? 1));
+          setVncScaleChoice(choiceForVncPercent(pct));
+          setVncCustomScale(String(pct === 100 ? 165 : pct));
         }
         if (d.shares && Array.isArray(d.shares)) {
           setSelectedShareRoles(d.shares.filter((s: { shareType: string }) => s.shareType === 'role').map((s: { targetId: string }) => s.targetId));
@@ -345,7 +342,14 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
         body.extraConfig = dbCfg;
       }
       if (protocol === 'vnc') {
-        const pct = parseInt(vncDesktopScale, 10) || 100;
+        const pct = vncScaleChoice === 'custom'
+          ? Number(vncCustomScale)
+          : parseInt(vncScaleChoice, 10) || 100;
+        if (!Number.isFinite(pct) || pct < 50 || pct > 400) {
+          setError('Remote display scale must be between 50% and 400%');
+          setSaving(false);
+          return;
+        }
         if (pct === 100) {
           body.extraConfig = null;
         } else {
@@ -735,17 +739,34 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
           {protocol === 'vnc' && (
             <div>
               <label className="block text-xs font-medium text-text-secondary mb-1">Remote display scale</label>
-              <select
-                value={vncDesktopScale}
-                onChange={(e) => setVncDesktopScale(e.target.value)}
-                className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent"
-              >
-                {VNC_DESKTOP_SCALES.map((pct) => (
-                  <option key={pct} value={String(pct)}>
-                    {pct === 100 ? '100% (default)' : `${pct}%`}
-                  </option>
-                ))}
-              </select>
+              <div className="flex gap-2">
+                <select
+                  value={vncScaleChoice}
+                  onChange={(e) => setVncScaleChoice(e.target.value)}
+                  className={`${vncScaleChoice === 'custom' ? 'w-1/2' : 'w-full'} px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent`}
+                >
+                  {VNC_DESKTOP_SCALES.map((pct) => (
+                    <option key={pct} value={String(pct)}>
+                      {pct === 100 ? '100% (default)' : `${pct}%`}
+                    </option>
+                  ))}
+                  <option value="custom">Custom</option>
+                </select>
+                {vncScaleChoice === 'custom' && (
+                  <div className="relative w-1/2">
+                    <input
+                      type="number"
+                      min={50}
+                      max={400}
+                      step={1}
+                      value={vncCustomScale}
+                      onChange={(e) => setVncCustomScale(e.target.value)}
+                      className="w-full px-2.5 py-1.5 pr-7 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent"
+                    />
+                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-text-secondary">%</span>
+                  </div>
+                )}
+              </div>
               <p className="text-[11px] text-text-secondary mt-1 leading-tight">
                 Match the scaling set on the remote desktop. Use this if the mouse is not lined up with what you see.
               </p>
