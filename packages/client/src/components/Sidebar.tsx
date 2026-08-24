@@ -481,6 +481,10 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
         shared: d.shared === 1,
         smbShare: d.extraConfig?.share ?? '',
         smbDomain: d.extraConfig?.domain ?? '',
+        pointerScaleX: d.extraConfig?.pointerScaleX != null && d.extraConfig.pointerScaleX !== 1 ? String(d.extraConfig.pointerScaleX) : '',
+        pointerScaleY: d.extraConfig?.pointerScaleY != null && d.extraConfig.pointerScaleY !== 1 ? String(d.extraConfig.pointerScaleY) : '',
+        pointerOffsetX: d.extraConfig?.pointerOffsetX ? String(d.extraConfig.pointerOffsetX) : '',
+        pointerOffsetY: d.extraConfig?.pointerOffsetY ? String(d.extraConfig.pointerOffsetY) : '',
         tunnels: (d.tunnels ?? []).map((t: { localPort: number; remoteHost: string; remotePort: number }) => ({
           id: crypto.randomUUID(),
           localPort: String(t.localPort),
