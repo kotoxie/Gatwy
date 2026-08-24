@@ -41,7 +41,7 @@ interface ConnectionModalProps {
 interface TunnelDef { id: string; localPort: string; remoteHost: string; remotePort: string; }
 
 /** Common remote desktop scaling (Windows / macOS / GNOME / KDE). */
-const VNC_DESKTOP_SCALES = [100, 125, 150, 175, 200, 225, 250, 300] as const;
+const VNC_DESKTOP_SCALES = [100, 125, 150, 165, 175, 200, 225, 250, 300] as const;
 
 function nearestVncDesktopScale(factor: number): string {
   if (!Number.isFinite(factor) || factor <= 0 || factor === 1) return '100';
