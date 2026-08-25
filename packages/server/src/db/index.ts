@@ -15,10 +15,109 @@ export function getDb(): Database {
   return db;
 }
 
+/**
+ * Crash-safe persist: write the full sql.js export to a temp file in the same
+ * directory, fsync, then rename over the destination (atomic on the same FS).
+ * Never truncates the primary DB mid-write if the process is killed.
+ */
 function saveDb(): void {
   const data = db.export();
   const buffer = Buffer.from(data);
-  fs.writeFileSync(config.dbPath, buffer);
+  const dbPath = config.dbPath;
+  const tmpPath = `${dbPath}.${process.pid}.tmp`;
+
+  try {
+    const fd = fs.openSync(tmpPath, 'w');
+    try {
+      fs.writeFileSync(fd, buffer);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(tmpPath, dbPath);
+  } catch (err) {
+    try {
+      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+    } catch { /* ignore cleanup errors */ }
+    throw err;
+  }
+}
+
+function quarantineCorruptDb(reason: string): void {
+  const ts = Date.now();
+  const quarantinePath = `${config.dbPath}.corrupt-${ts}`;
+  console.warn(
+    `[DB] Database disk image is malformed or failed integrity check (${reason}). ` +
+    `Quarantining to ${quarantinePath} and starting with a fresh database.`,
+  );
+
+  try {
+    if (fs.existsSync(config.dbPath)) {
+      fs.renameSync(config.dbPath, quarantinePath);
+    }
+  } catch (e) {
+    console.warn(`[DB] Failed to quarantine corrupt DB: ${(e as Error).message}`);
+  }
+
+  // Leftover WAL/SHM from older native-SQLite or mistaken WAL use: move aside too.
+  for (const suffix of ['-wal', '-shm'] as const) {
+    const side = `${config.dbPath}${suffix}`;
+    if (!fs.existsSync(side)) continue;
+    try {
+      fs.renameSync(side, `${side}.corrupt-${ts}`);
+    } catch { /* ignore */ }
+  }
+}
+
+/** Returns null if OK, otherwise a short reason string. */
+function integrityFailureReason(database: Database): string | null {
+  try {
+    const check = database.exec('PRAGMA integrity_check');
+    const ok =
+      check.length > 0
+      && check[0].values.length > 0
+      && check[0].values[0][0] === 'ok';
+    return ok ? null : 'PRAGMA integrity_check failed';
+  } catch (e) {
+    // sql.js often constructs a Database from bad bytes without throwing;
+    // the first PRAGMA/query then surfaces "malformed" / "not a database".
+    return (e as Error).message || 'PRAGMA integrity_check threw';
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function openOrRecoverDatabase(SQL: any): Database {
+  if (!fs.existsSync(config.dbPath)) {
+    return new SQL.Database();
+  }
+
+  let database: Database | undefined;
+  try {
+    const fileBuffer = fs.readFileSync(config.dbPath);
+    database = new SQL.Database(fileBuffer) as Database;
+    const failure = integrityFailureReason(database);
+    if (failure) {
+      try { database.close(); } catch { /* ignore */ }
+      database = undefined;
+      quarantineCorruptDb(failure);
+      return new SQL.Database();
+    }
+    return database;
+  } catch (e) {
+    try { database?.close(); } catch { /* ignore */ }
+    quarantineCorruptDb((e as Error).message || 'open failed');
+    return new SQL.Database();
+  }
+}
+
+function applyDbPragmas(database: Database): void {
+  // sql.js persistence is a full-DB export to a single file, not OS-level SQLite
+  // page I/O. WAL journal mode is meaningless (and unsafe) with that model: it
+  // can leave -wal/-shm sidecar expectations that export/writeFile never honor.
+  // Use exec: journal_mode is a returning PRAGMA. sql.js export() later reports
+  // DELETE, which is also safe (no -wal/-shm); never set WAL.
+  database.exec('PRAGMA journal_mode = MEMORY');
+  database.run('PRAGMA foreign_keys = ON');
 }
 
 // Auto-save on a timer to avoid data loss
@@ -36,15 +135,8 @@ export async function initDb(): Promise<Database> {
   const SQL = await initSqlJs();
   SqlModule = SQL;
 
-  if (fs.existsSync(config.dbPath)) {
-    const fileBuffer = fs.readFileSync(config.dbPath);
-    db = new SQL.Database(fileBuffer);
-  } else {
-    db = new SQL.Database();
-  }
-
-  db.run('PRAGMA journal_mode = WAL');
-  db.run('PRAGMA foreign_keys = ON');
+  db = openOrRecoverDatabase(SQL);
+  applyDbPragmas(db);
 
   runMigrations();
 
@@ -55,7 +147,7 @@ export async function initDb(): Promise<Database> {
   saveDb();
   startAutoSave();
 
-  // Save on process exit
+  // Save on process exit (same atomic path as the interval)
   process.on('beforeExit', () => { try { saveDb(); } catch { /* ignore */ } });
   process.on('exit', () => { try { saveDb(); } catch { /* ignore */ } });
 
@@ -67,8 +159,19 @@ export function persistDb(): void {
 }
 
 export function restoreDbFromBytes(bytes: Buffer): void {
-  db = new SqlModule.Database(bytes) as Database;
-  saveDb();
+  const next = new SqlModule.Database(bytes) as Database;
+  applyDbPragmas(next);
+  const prev = db;
+  db = next;
+  try {
+    saveDb();
+  } catch (err) {
+    // Keep the previous in-memory DB if the atomic persist failed.
+    db = prev;
+    try { next.close(); } catch { /* ignore */ }
+    throw err;
+  }
+  try { prev?.close(); } catch { /* ignore */ }
 }
 
 function runMigrations() {
