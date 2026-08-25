@@ -13,6 +13,8 @@ import { setupRdpProxy } from './ws/rdpProxy.js';
 import { setupSshProxy } from './ws/sshProxy.js';
 import { setupVncProxy } from './ws/vncProxy.js';
 import { setupTelnetProxy } from './ws/telnetProxy.js';
+import { setupMoonlightProxy } from './ws/moonlightProxy.js';
+import { ensureMoonlightWeb, isMoonlightWebAvailable, stopMoonlightWeb } from './services/moonlightWeb.js';
 import { getSetting } from './services/settings.js';
 import { startAutoBackupScheduler } from './services/autoBackup.js';
 import authRoutes from './routes/auth.js';
@@ -33,6 +35,7 @@ import fileSessionsRoutes from './routes/file-sessions.js';
 import rolesRoutes from './routes/roles.js';
 import notificationsRoutes from './routes/notifications.js';
 import databaseRoutes from './routes/database.js';
+import moonlightRoutes from './routes/moonlight.js';
 import { ipRulesMiddleware } from './middleware/ipRules.js';
 
 async function main() {
@@ -158,6 +161,7 @@ async function main() {
   app.use('/api/v1/roles', rolesRoutes);
   app.use('/api/v1/notifications', notificationsRoutes);
   app.use('/api/v1/db', databaseRoutes);
+  app.use('/api/v1/moonlight', moonlightRoutes);
   app.use('/health', healthRoutes);
 
   // Global JSON error handler — prevents Express from returning HTML 500 pages
@@ -168,6 +172,13 @@ async function main() {
       res.status(500).json({ error: 'Internal server error' });
     }
   });
+
+  // HTTPS server (created before /mlw so the WS upgrade handler can attach)
+  const server = https.createServer({ cert, key }, app);
+
+  // /mlw HTTP + WS: JWT cookie + protocols.moonlight (same authorizeMoonlightAccess)
+  // Must be registered before the SPA catch-all.
+  setupMoonlightProxy(server, app);
 
   // Serve frontend static files
   const clientDir = config.clientDir;
@@ -182,9 +193,6 @@ async function main() {
     });
   }
 
-  // HTTPS server
-  const server = https.createServer({ cert, key }, app);
-
   // WebSocket proxies
   setupRdpProxy(server);
   setupSshProxy(server);
@@ -194,6 +202,7 @@ async function main() {
   // Graceful shutdown
   function shutdown() {
     console.log('\n[Gatwy] Shutting down gracefully...');
+    stopMoonlightWeb();
     persistDb();
     server.close(() => {
       console.log('[Gatwy] Server closed.');
@@ -208,6 +217,11 @@ async function main() {
   // Start
   server.listen(config.port, () => {
     console.log(`[Gatwy] Running on https://localhost:${config.port}`);
+    if (isMoonlightWebAvailable()) {
+      ensureMoonlightWeb().catch((err) => {
+        console.error('[Moonlight] Failed to start:', err instanceof Error ? err.message : err);
+      });
+    }
   });
 }
 

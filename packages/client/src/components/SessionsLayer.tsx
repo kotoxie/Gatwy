@@ -8,6 +8,7 @@ import { SftpSession } from './SftpSession';
 import { FtpSession } from './FtpSession';
 import { TelnetSession } from './TelnetSession';
 import { DbSession } from './db/DbSession';
+import { MoonlightSession } from './MoonlightSession';
 
 interface SessionsLayerProps {
   tabs: Tab[];
@@ -100,6 +101,15 @@ export function SessionsLayer({
             )}
             {tab.protocol === 'vnc' && (
               <VncSession
+                connectionId={tab.connectionId}
+                connectionName={tab.name}
+                isActive={isActive}
+                onStatusChange={(status) => onStatusChange(tab.id, status)}
+                onClose={() => onClose(tab.id)}
+              />
+            )}
+            {tab.protocol === 'moonlight' && (
+              <MoonlightSession
                 connectionId={tab.connectionId}
                 connectionName={tab.name}
                 isActive={isActive}

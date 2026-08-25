@@ -78,10 +78,28 @@ Open **`https://<YOUR_IP>:7443`** — on first launch you'll be prompted to crea
 | `TLS_CERT_PATH` / `TLS_KEY_PATH` | *(auto)* | Custom TLS certificate & key paths |
 | `DATA_DIR` | `/app/data` | Database, certs, recordings, and logs |
 | `OIDC_TOKEN_AUTH_METHOD` | `client_secret_basic` | OIDC token endpoint client auth. Use `client_secret_basic` (or `basic`) or `client_secret_post` (or `post`). |
+| `ENABLE_MOONLIGHT` | unset | Opt in to Moonlight / Sunshine. Set to `1`, `true`, or `yes` to download a pinned moonlight-web-stream release at start. Default image stays MIT-clean. |
 
 > ⚠️ If no encryption key env var is set, Gatwy auto-generates one at `/app/data/encryption.key` with a warning banner. Fine for home-lab — not recommended for production.
 
 👉 **[Full configuration reference →](https://docs.gatwy.dev)**
+
+---
+
+## Optional: Moonlight / Sunshine
+
+Moonlight is **off by default**. The helper we use, [moonlight-web-stream](https://github.com/MrCreativ3001/moonlight-web-stream), is GPL-3.0. Gatwy does not bundle it. Gatwy itself stays MIT.
+
+```yaml
+services:
+  gatwy:
+    environment:
+      - ENABLE_MOONLIGHT=1
+```
+
+On start the entrypoint downloads a pinned release into `/opt/moonlight-web` and Moonlight shows up in the protocol picker. PIN pairing uses the Sunshine web UI. When the env var is unset, Moonlight stays hidden; stored Moonlight connections are kept and come back if you enable it later.
+
+See [THIRD_PARTY.md](THIRD_PARTY.md) for the license note and pinned release.
 
 ---
 

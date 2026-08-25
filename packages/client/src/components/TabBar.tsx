@@ -20,6 +20,7 @@ const protocolIcons: Record<string, string> = {
   rdp: '🖥',
   smb: '📁',
   vnc: '🖱',
+  moonlight: '☾',
   sftp: '📂',
   ftp: '🗂',
   telnet: '⌨',

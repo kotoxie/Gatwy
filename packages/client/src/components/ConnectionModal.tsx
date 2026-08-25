@@ -37,6 +37,8 @@ interface ConnectionModalProps {
   onSaved: () => void;
   /** Pre-fill fields for duplicate/copy mode (connection must be null) */
   prefill?: ConnectionPrefill;
+  /** When false, Moonlight is omitted from the protocol picker (runtime unavailable). */
+  moonlightAvailable?: boolean;
 }
 
 interface TunnelDef { id: string; localPort: string; remoteHost: string; remotePort: string; }
@@ -53,6 +55,7 @@ const defaultPorts: Record<string, number> = {
   rdp: 3389,
   smb: 445,
   vnc: 5900,
+  moonlight: 47989,
   sftp: 22,
   ftp: 21,
   telnet: 23,
@@ -63,7 +66,7 @@ const defaultPorts: Record<string, number> = {
 type ProtocolCategory = 'remote-control' | 'terminal' | 'file-browser' | 'db';
 
 function getCategoryForProtocol(p: Protocol): ProtocolCategory {
-  if (p === 'rdp' || p === 'vnc') return 'remote-control';
+  if (p === 'rdp' || p === 'vnc' || p === 'moonlight') return 'remote-control';
   if (p === 'ssh' || p === 'telnet') return 'terminal';
   if (p === 'smb' || p === 'sftp' || p === 'ftp') return 'file-browser';
   return 'db';
@@ -94,6 +97,11 @@ const PROTOCOL_CATEGORIES: { id: ProtocolCategory; label: string; headerIcon: Re
           <circle cx="12" cy="10" r="3" />
           <line x1="8" y1="21" x2="16" y2="21" />
           <line x1="12" y1="17" x2="12" y2="21" />
+        </svg>
+      )},
+      { id: 'moonlight', label: 'Moonlight', icon: (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
         </svg>
       )},
     ],
@@ -185,7 +193,7 @@ const PROTOCOL_CATEGORIES: { id: ProtocolCategory; label: string; headerIcon: Re
   },
 ];
 
-export function ConnectionModal({ connection, groups, onClose, onSaved, prefill }: ConnectionModalProps) {
+export function ConnectionModal({ connection, groups, onClose, onSaved, prefill, moonlightAvailable = false }: ConnectionModalProps) {
 
   const [name, setName] = useState(prefill?.name ?? connection?.name ?? '');
   const [protocol, setProtocol] = useState<Protocol>(prefill?.protocol ?? connection?.protocol ?? 'rdp');
@@ -434,7 +442,7 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
                   <span className="text-text-secondary">{cat.headerIcon}</span>
                   <span className="text-[10px] font-semibold text-text-secondary uppercase tracking-wider">{cat.label}</span>
                 </div>
-                {cat.protocols.map(({ id: p, label, icon }) => (
+                {cat.protocols.filter((p) => p.id !== 'moonlight' || moonlightAvailable).map(({ id: p, label, icon }) => (
                   <button
                     key={p}
                     type="button"
@@ -495,6 +503,14 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
             </div>
           </div>
 
+          {protocol === 'moonlight' && (
+            <p className="text-xs text-text-secondary leading-relaxed">
+              Host is the Sunshine PC. Default port <span className="text-text-primary">47989</span> is the GameStream HTTP port.
+              On first connect Gatwy shows a PIN to enter in the Sunshine web UI.
+            </p>
+          )}
+
+          {protocol !== 'moonlight' && (
           <div className="flex gap-2">
             <div className="flex-1">
               <label className="block text-xs font-medium text-text-secondary mb-1">Username</label>
@@ -518,6 +534,7 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
               />
             </div>
           </div>
+          )}
 
           {protocol === 'ssh' && (
             <div>

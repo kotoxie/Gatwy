@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as RMouseEvent } from 'react';
 import { clsx } from 'clsx';
 import { useSettings } from '../hooks/useSettings';
+import { useAuth } from '../hooks/useAuth';
 import { ConnectionModal, type ConnectionPrefill } from './ConnectionModal';
 import { type Protocol } from '../types/protocol.js';
 import { pointerScaleToPercent } from '../lib/vncPointerMap';
@@ -68,6 +69,7 @@ const PROTOCOL_ICONS: Record<string, string> = {
   rdp: '🖥',
   smb: '📁',
   vnc: '🖱',
+  moonlight: '☾',
   sftp: '📂',
   ftp: '🗂',
   telnet: '⌨',
@@ -153,6 +155,11 @@ const PROTOCOL_SUBMENU: Array<{ protocol: Protocol; label: string; icon: React.R
       <line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
     </svg>
   )},
+  { protocol: 'moonlight', label: 'Moonlight', icon: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </svg>
+  )},
   { protocol: 'telnet', label: 'Telnet', icon: (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
       <polyline points="4 17 10 11 4 5" />
@@ -188,10 +195,10 @@ const PROTOCOL_SUBMENU: Array<{ protocol: Protocol; label: string; icon: React.R
   )},
 ];
 
-function ProtocolSubmenuItems({ groupId: _groupId, onSelect }: { groupId: string | null; onSelect: (p: Protocol) => void }) {
+function ProtocolSubmenuItems({ groupId: _groupId, onSelect, moonlightAvailable }: { groupId: string | null; onSelect: (p: Protocol) => void; moonlightAvailable: boolean }) {
   return (
     <>
-      {PROTOCOL_SUBMENU.map(({ protocol, label, icon }) => (
+      {PROTOCOL_SUBMENU.filter(({ protocol }) => protocol !== 'moonlight' || moonlightAvailable).map(({ protocol, label, icon }) => (
         <button
           key={protocol}
           className="w-full px-3 py-1.5 text-left hover:bg-surface-hover text-text-primary flex items-center gap-2.5 whitespace-nowrap"
@@ -207,6 +214,8 @@ function ProtocolSubmenuItems({ groupId: _groupId, onSelect }: { groupId: string
 
 export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
   const { settings } = useSettings();
+  const { features } = useAuth();
+  const moonlightAvailable = features.moonlight;
   const healthMonitorEnabled = settings['health_monitor.enabled'] !== 'false';
   const [groups, setGroups] = useState<ConnectionGroup[]>([]);
   const [ungrouped, setUngrouped] = useState<Connection[]>([]);
@@ -1288,11 +1297,12 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
         <ConnectionModal
           connection={editingConnection}
           groups={flattenGroups(groups)}
+          moonlightAvailable={moonlightAvailable}
           prefill={duplicatePrefill ?? (!editingConnection ? {
             name: '',
             protocol: newConnProtocol,
             host: '',
-            port: { rdp: 3389, ssh: 22, smb: 445, vnc: 5900, sftp: 22, ftp: 21, telnet: 23, postgres: 5432, mysql: 3306 }[newConnProtocol] ?? 3389,
+            port: { rdp: 3389, ssh: 22, smb: 445, vnc: 5900, moonlight: 47989, sftp: 22, ftp: 21, telnet: 23, postgres: 5432, mysql: 3306 }[newConnProtocol] ?? 3389,
             username: '',
             groupId: newConnGroupId,
             shared: false,
@@ -1541,7 +1551,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
                   bgSubmenuOpenUp ? 'bottom-0' : 'top-0',
                 )}
               >
-                <ProtocolSubmenuItems groupId={null} onSelect={(p) => { openNewConnectionInFolder(null, p); setBgContextMenu(null); setShowNewConnSubmenu(false); }} />
+                <ProtocolSubmenuItems moonlightAvailable={moonlightAvailable} groupId={null} onSelect={(p) => { openNewConnectionInFolder(null, p); setBgContextMenu(null); setShowNewConnSubmenu(false); }} />
               </div>
             )}
           </div>
@@ -1596,7 +1606,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
                   folderSubmenuOpenUp ? 'bottom-0' : 'top-0',
                 )}
               >
-                <ProtocolSubmenuItems groupId={folderContextMenu.group.id} onSelect={(p) => { openNewConnectionInFolder(folderContextMenu.group.id, p); setFolderContextMenu(null); setShowNewConnSubmenu(false); }} />
+                <ProtocolSubmenuItems moonlightAvailable={moonlightAvailable} groupId={folderContextMenu.group.id} onSelect={(p) => { openNewConnectionInFolder(folderContextMenu.group.id, p); setFolderContextMenu(null); setShowNewConnSubmenu(false); }} />
               </div>
             )}
           </div>
