@@ -8,8 +8,6 @@ normal (100%) desktop.
 export type VncPointerMap = {
   pointerScaleX: number;
   pointerScaleY: number;
-  pointerOffsetX: number;
-  pointerOffsetY: number;
 };
 
 function num(value: unknown, fallback: number): number {
@@ -26,18 +24,17 @@ export function parseVncPointerMap(extra: unknown): VncPointerMap {
   return {
     pointerScaleX: num(o.pointerScaleX, 1),
     pointerScaleY: num(o.pointerScaleY, 1),
-    pointerOffsetX: num(o.pointerOffsetX, 0),
-    pointerOffsetY: num(o.pointerOffsetY, 0),
   };
 }
 
 export function isIdentityPointerMap(map: VncPointerMap): boolean {
-  return (
-    map.pointerScaleX === 1 &&
-    map.pointerScaleY === 1 &&
-    map.pointerOffsetX === 0 &&
-    map.pointerOffsetY === 0
-  );
+  return map.pointerScaleX === 1 && map.pointerScaleY === 1;
+}
+
+/** Convert a pointer scale factor back to the desktop scale percentage (e.g. 0.5 → 200). */
+export function pointerScaleToPercent(factor: number): number {
+  if (!Number.isFinite(factor) || factor <= 0 || factor === 1) return 100;
+  return Math.round(100 / factor);
 }
 
 type RfbDisplay = {
@@ -53,11 +50,11 @@ export function applyVncPointerMap(rfb: object, extra: unknown): boolean {
   const map = parseVncPointerMap(extra);
   if (isIdentityPointerMap(map)) return false;
   const rec = rfb as RfbDisplay;
-  if (rec.__gatwyPtrMap || !rec._display) return false;
+  if (rec.__gatwyPtrMap || !rec._display?.absX || !rec._display?.absY) return false;
   const ax = rec._display.absX.bind(rec._display);
   const ay = rec._display.absY.bind(rec._display);
-  rec._display.absX = (n) => Math.round(ax(n) * map.pointerScaleX + map.pointerOffsetX);
-  rec._display.absY = (n) => Math.round(ay(n) * map.pointerScaleY + map.pointerOffsetY);
+  rec._display.absX = (n) => Math.round(ax(n) * map.pointerScaleX);
+  rec._display.absY = (n) => Math.round(ay(n) * map.pointerScaleY);
   rec.__gatwyPtrMap = true;
   return true;
 }

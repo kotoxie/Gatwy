@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect, type ReactNode, type FormEvent } from 'react';
 import { type Protocol } from '../types/protocol.js';
+import { pointerScaleToPercent } from '../lib/vncPointerMap';
 interface Connection {
   id: string;
   name: string;
@@ -42,11 +43,6 @@ interface TunnelDef { id: string; localPort: string; remoteHost: string; remoteP
 
 /** Common remote desktop scaling (Windows / macOS / GNOME / KDE). */
 const VNC_DESKTOP_SCALES = [100, 125, 150, 175, 200, 225, 250, 300] as const;
-
-function percentFromPointerScale(factor: number): number {
-  if (!Number.isFinite(factor) || factor <= 0 || factor === 1) return 100;
-  return Math.round(100 / factor);
-}
 
 function choiceForVncPercent(percent: number): string {
   return (VNC_DESKTOP_SCALES as readonly number[]).includes(percent) ? String(percent) : 'custom';
@@ -211,7 +207,7 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
   const [smbShare, setSmbShare] = useState(prefill?.smbShare ?? '');
   const [smbDomain, setSmbDomain] = useState(prefill?.smbDomain ?? '');
   const [vncScaleChoice, setVncScaleChoice] = useState(() => choiceForVncPercent(parseInt(prefill?.vncDesktopScale ?? '100', 10) || 100));
-  const [vncCustomScale, setVncCustomScale] = useState(prefill?.vncDesktopScale ?? '165');
+  const [vncCustomScale, setVncCustomScale] = useState(prefill?.vncDesktopScale ?? '125');
   // DB-specific fields
   const [dbDatabase, setDbDatabase] = useState('');
   const [dbSslMode, setDbSslMode] = useState<'disable' | 'require' | 'verify-ca' | 'verify-full'>('disable');
@@ -253,9 +249,9 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
         if (d.skipCertValidation !== undefined) setSkipCertValidation(!!d.skipCertValidation);
         if (d.extraConfig?.promptOnConnect) setPromptOnConnect(true);
         {
-          const pct = percentFromPointerScale(Number(d.extraConfig?.pointerScaleX ?? 1));
+          const pct = pointerScaleToPercent(Number(d.extraConfig?.pointerScaleX ?? 1));
           setVncScaleChoice(choiceForVncPercent(pct));
-          setVncCustomScale(String(pct === 100 ? 165 : pct));
+          setVncCustomScale(String(pct === 100 ? 125 : pct));
         }
         if (d.shares && Array.isArray(d.shares)) {
           setSelectedShareRoles(d.shares.filter((s: { shareType: string }) => s.shareType === 'role').map((s: { targetId: string }) => s.targetId));
@@ -351,7 +347,7 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill 
           return;
         }
         if (pct === 100) {
-          body.extraConfig = null;
+          body.extraConfig = {};
         } else {
           const factor = 100 / pct;
           body.extraConfig = { pointerScaleX: factor, pointerScaleY: factor };

@@ -286,6 +286,19 @@ router.post('/', (req: Request, res: Response) => {
     return;
   }
 
+  // Validate VNC pointer scale: factor = 100/percent, valid percent range [50, 400] → factor [0.25, 2]
+  if (protocol === 'vnc' && extraConfig) {
+    const cfg = extraConfig as Record<string, unknown>;
+    const sx = cfg.pointerScaleX;
+    const sy = cfg.pointerScaleY;
+    if (sx !== undefined && (typeof sx !== 'number' || !Number.isFinite(sx) || sx < 0.25 || sx > 2)) {
+      res.status(400).json({ error: 'Invalid VNC pointer scale' }); return;
+    }
+    if (sy !== undefined && (typeof sy !== 'number' || !Number.isFinite(sy) || sy < 0.25 || sy > 2)) {
+      res.status(400).json({ error: 'Invalid VNC pointer scale' }); return;
+    }
+  }
+
   const id = uuid();
   const encryptedPassword = password ? encrypt(password) : null;
   const encryptedKey = privateKey ? encrypt(privateKey) : null;
@@ -382,6 +395,19 @@ router.put('/:id', (req: Request, res: Response) => {
   };
 
   const { name, protocol, host, port, username, password, groupId, privateKey, shared, tunnels, extraConfig, tags, skipCertValidation } = req.body;
+
+  // Validate VNC pointer scale on update
+  if (extraConfig && (protocol === 'vnc' || (!protocol && existing.protocol === 'vnc'))) {
+    const cfg = extraConfig as Record<string, unknown>;
+    const sx = cfg.pointerScaleX;
+    const sy = cfg.pointerScaleY;
+    if (sx !== undefined && (typeof sx !== 'number' || !Number.isFinite(sx) || sx < 0.25 || sx > 2)) {
+      res.status(400).json({ error: 'Invalid VNC pointer scale' }); return;
+    }
+    if (sy !== undefined && (typeof sy !== 'number' || !Number.isFinite(sy) || sy < 0.25 || sy > 2)) {
+      res.status(400).json({ error: 'Invalid VNC pointer scale' }); return;
+    }
+  }
 
   const updates: string[] = [];
   const params: unknown[] = [];
@@ -536,15 +562,25 @@ router.get('/:id/session', (req: Request, res: Response) => {
 
   const password = conn.encrypted_password ? decrypt(conn.encrypted_password) : '';
 
-  let extraConfig: unknown = null;
-  try { if (conn.extra_config_json) extraConfig = JSON.parse(conn.extra_config_json); } catch { /* ignore */ }
+  // Only expose VNC pointer-scale fields — never return the full extraConfig blob.
+  let vncPointerConfig: { pointerScaleX: number; pointerScaleY: number } | null = null;
+  if (conn.protocol === 'vnc' && conn.extra_config_json) {
+    try {
+      const raw = JSON.parse(conn.extra_config_json) as Record<string, unknown>;
+      const sx = raw.pointerScaleX;
+      const sy = raw.pointerScaleY;
+      if (typeof sx === 'number' && Number.isFinite(sx) && typeof sy === 'number' && Number.isFinite(sy)) {
+        vncPointerConfig = { pointerScaleX: sx, pointerScaleY: sy };
+      }
+    } catch { /* ignore */ }
+  }
 
   res.json({
     host: conn.host,
     port: conn.port,
     username: conn.username || '',
     password,
-    extraConfig,
+    ...(vncPointerConfig ? { extraConfig: vncPointerConfig } : {}),
   });
 });
 

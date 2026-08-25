@@ -3,6 +3,7 @@ import { clsx } from 'clsx';
 import { useSettings } from '../hooks/useSettings';
 import { ConnectionModal, type ConnectionPrefill } from './ConnectionModal';
 import { type Protocol } from '../types/protocol.js';
+import { pointerScaleToPercent } from '../lib/vncPointerMap';
 
 interface ConnectionGroup {
   id: string;
@@ -481,11 +482,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
         shared: d.shared === 1,
         smbShare: d.extraConfig?.share ?? '',
         smbDomain: d.extraConfig?.domain ?? '',
-        vncDesktopScale: (() => {
-          const sx = Number(d.extraConfig?.pointerScaleX ?? 1);
-          if (!Number.isFinite(sx) || sx <= 0 || sx === 1) return '100';
-          return String(Math.round(100 / sx));
-        })(),
+        vncDesktopScale: String(pointerScaleToPercent(Number(d.extraConfig?.pointerScaleX ?? 1))),
         tunnels: (d.tunnels ?? []).map((t: { localPort: number; remoteHost: string; remotePort: number }) => ({
           id: crypto.randomUUID(),
           localPort: String(t.localPort),
