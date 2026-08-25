@@ -4,6 +4,7 @@ import { getWsTicket } from '../lib/wsTicket';
 import { DisconnectOverlay } from './DisconnectOverlay';
 import { VncControlPanel } from './VncControlPanel';
 import { VncMobileKeyboard } from './VncMobileKeyboard';
+import { applyVncPointerMap } from '../lib/vncPointerMap';
 
 interface VncSessionProps {
   connectionId: string;
@@ -57,7 +58,7 @@ export function VncSession({ connectionId, connectionName, isActive, onStatusCha
           credentials: 'include',
         });
         if (!res.ok) throw new Error('Failed to fetch connection credentials');
-        const info: { username?: string; password?: string } = await res.json();
+        const info: { username?: string; password?: string; extraConfig?: unknown } = await res.json();
         if (cancelled) return;
 
         // noVNC 1.7.0 ships as pure ESM so a direct dynamic import works
@@ -128,6 +129,7 @@ export function VncSession({ connectionId, connectionName, isActive, onStatusCha
         resizeObserver.observe(container);
 
         rfb.addEventListener('connect', () => {
+          if (rfb) applyVncPointerMap(rfb, info.extraConfig);
           if (!cancelled) setAndNotify('connected');
         });
 

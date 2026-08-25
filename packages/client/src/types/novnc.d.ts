@@ -36,6 +36,11 @@ declare module '@novnc/novnc' {
     qualityLevel: number;
     compressionLevel: number;
     focusOnClick: boolean;
+    /** Internal noVNC Display; used to remap pointer coords. */
+    _display?: {
+      absX: (n: number) => number;
+      absY: (n: number) => number;
+    };
 
     disconnect(): void;
     sendCredentials(creds: { username?: string; password?: string; target?: string }): void;
