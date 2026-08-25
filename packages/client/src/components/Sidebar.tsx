@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as RMouseEvent } from 'react';
 import { clsx } from 'clsx';
 import { useSettings } from '../hooks/useSettings';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { ConnectionModal, type ConnectionPrefill } from './ConnectionModal';
 import { type Protocol } from '../types/protocol.js';
 import { pointerScaleToPercent } from '../lib/vncPointerMap';
@@ -46,6 +47,10 @@ interface FolderContextMenu {
   y: number;
   group: ConnectionGroup;
 }
+
+type DeleteFolderConfirm =
+  | { kind: 'group'; group: ConnectionGroup; connCount: number }
+  | { kind: 'connection'; conn: Connection };
 
 function flattenGroups(groups: ConnectionGroup[], prefix = ''): FlatGroup[] {
   const result: FlatGroup[] = [];
@@ -207,6 +212,7 @@ function ProtocolSubmenuItems({ groupId: _groupId, onSelect }: { groupId: string
 
 export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
   const { settings } = useSettings();
+  const isMobile = useIsMobile();
   const healthMonitorEnabled = settings['health_monitor.enabled'] !== 'false';
   const [groups, setGroups] = useState<ConnectionGroup[]>([]);
   const [ungrouped, setUngrouped] = useState<Connection[]>([]);
@@ -241,7 +247,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
   const [renameValue, setRenameValue] = useState('');
   const [newConnGroupId, setNewConnGroupId] = useState<string | null>(null);
   const [newConnProtocol, setNewConnProtocol] = useState<Protocol>('rdp');
-  const [deleteFolderConfirm, setDeleteFolderConfirm] = useState<{ group: ConnectionGroup; connCount: number } | null>(null);
+  const [deleteFolderConfirm, setDeleteFolderConfirm] = useState<DeleteFolderConfirm | null>(null);
   const [showExportConfirm, setShowExportConfirm] = useState(false);
   const [importResult, setImportResult] = useState<{ connectionsCreated: number; groupsCreated: number } | { error: string } | null>(null);
   const [showSearch, setShowSearch] = useState(false);
@@ -394,7 +400,16 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
       method: 'DELETE',
       credentials: 'include',
     });
+    setDeleteFolderConfirm(null);
     fetchConnections();
+  }
+
+  function requestDeleteConnection(conn: Connection) {
+    if (isMobile) {
+      setDeleteFolderConfirm({ kind: 'connection', conn });
+      return;
+    }
+    void deleteConnection(conn.id);
   }
 
   function requestDeleteGroup(group: ConnectionGroup) {
@@ -402,8 +417,10 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
     const count = (g: ConnectionGroup): number =>
       g.connections.length + g.children.reduce((s, c) => s + count(c), 0);
     const connCount = count(group);
-    if (connCount > 0) {
-      setDeleteFolderConfirm({ group, connCount });
+    // Hover/fine pointer: only folders with connections confirm.
+    // Coarse/no-hover: always confirm, including empty folders, because trash is always visible.
+    if (connCount > 0 || isMobile) {
+      setDeleteFolderConfirm({ kind: 'group', group, connCount });
     } else {
       void confirmDeleteGroup(group.id);
     }
@@ -416,6 +433,15 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
     });
     setDeleteFolderConfirm(null);
     fetchConnections();
+  }
+
+  function confirmPendingDelete() {
+    if (!deleteFolderConfirm) return;
+    if (deleteFolderConfirm.kind === 'connection') {
+      void deleteConnection(deleteFolderConfirm.conn.id);
+      return;
+    }
+    void confirmDeleteGroup(deleteFolderConfirm.group.id);
   }
 
   async function renameGroup(id: string, newName: string) {
@@ -822,7 +848,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
             {conn.tags.length > 2 && <span className="text-[9px] text-text-secondary">+{conn.tags.length - 2}</span>}
           </span>
         )}
-        <div className="hidden group-hover/conn:flex items-center gap-0.5 shrink-0">
+        <div className={isMobile ? 'flex items-center gap-0.5 shrink-0' : 'hidden group-hover/conn:flex items-center gap-0.5 shrink-0'}>
           <button
             onClick={(e) => { e.stopPropagation(); setEditingConnection(conn); setShowModal(true); }}
             title="Edit"
@@ -831,7 +857,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
             <EditIcon />
           </button>
           <button
-            onClick={(e) => { e.stopPropagation(); deleteConnection(conn.id); }}
+            onClick={(e) => { e.stopPropagation(); requestDeleteConnection(conn); }}
             title="Delete"
             className="p-1 rounded text-text-secondary hover:text-red-400 hover:bg-surface"
           >
@@ -1005,7 +1031,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
           <button
             onClick={(e) => { e.stopPropagation(); requestDeleteGroup(group); }}
             title="Delete folder"
-            className="hidden group-hover/folder:flex p-1 rounded text-text-secondary hover:text-red-400 hover:bg-surface"
+            className={isMobile ? 'flex p-1 rounded text-text-secondary hover:text-red-400 hover:bg-surface' : 'hidden group-hover/folder:flex p-1 rounded text-text-secondary hover:text-red-400 hover:bg-surface'}
           >
             <TrashIcon size={11} />
           </button>
@@ -1419,12 +1445,20 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
                 <TrashIcon size={16} />
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-text-primary mb-1">Delete "{deleteFolderConfirm.group.name}"?</h3>
-                <p className="text-xs text-text-secondary leading-relaxed">
-                  This folder contains <span className="font-semibold text-red-400">{deleteFolderConfirm.connCount} connection{deleteFolderConfirm.connCount !== 1 ? 's' : ''}</span>.
-                  Deleting this folder will permanently remove all connections inside it.
-                  This action cannot be undone.
-                </p>
+                <h3 className="text-sm font-semibold text-text-primary mb-1">
+                  Delete "{deleteFolderConfirm.kind === 'connection' ? deleteFolderConfirm.conn.name : deleteFolderConfirm.group.name}"?
+                </h3>
+                {deleteFolderConfirm.kind === 'group' && deleteFolderConfirm.connCount > 0 ? (
+                  <p className="text-xs text-text-secondary leading-relaxed">
+                    This folder contains <span className="font-semibold text-red-400">{deleteFolderConfirm.connCount} connection{deleteFolderConfirm.connCount !== 1 ? 's' : ''}</span>.
+                    Deleting this folder will permanently remove all connections inside it.
+                    This action cannot be undone.
+                  </p>
+                ) : (
+                  <p className="text-xs text-text-secondary leading-relaxed">
+                    This action cannot be undone.
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex gap-2 justify-end">
@@ -1437,10 +1471,12 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
               </button>
               <button
                 type="button"
-                onClick={() => confirmDeleteGroup(deleteFolderConfirm.group.id)}
+                onClick={confirmPendingDelete}
                 className="px-3 py-1.5 text-xs bg-red-500 hover:bg-red-600 text-white rounded font-medium"
               >
-                Delete folder &amp; {deleteFolderConfirm.connCount} connection{deleteFolderConfirm.connCount !== 1 ? 's' : ''}
+                {deleteFolderConfirm.kind === 'group' && deleteFolderConfirm.connCount > 0
+                  ? `Delete folder & ${deleteFolderConfirm.connCount} connection${deleteFolderConfirm.connCount !== 1 ? 's' : ''}`
+                  : 'Delete'}
               </button>
             </div>
           </div>
@@ -1501,7 +1537,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
               </button>
               <button
                 className="w-full px-4 py-1.5 text-left hover:bg-surface-hover text-red-400 flex items-center gap-2"
-                onClick={() => { deleteConnection(contextMenu.conn.id); setContextMenu(null); }}
+                onClick={() => { requestDeleteConnection(contextMenu.conn); setContextMenu(null); }}
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <polyline points="3 6 5 6 21 6" />

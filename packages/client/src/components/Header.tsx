@@ -100,7 +100,7 @@ export function Header({
 
   return (
     <>
-    <header className="flex items-center justify-between h-12 px-4 bg-surface-alt border-b border-border shrink-0">
+    <header className="sticky top-0 z-40 flex items-center justify-between h-[calc(3rem+env(safe-area-inset-top,0px))] pt-[env(safe-area-inset-top,0px)] px-4 bg-surface-alt border-b border-border shrink-0">
       <div className="flex items-center gap-3">
         <button
           onClick={onCycleSidebarMode}
@@ -108,9 +108,9 @@ export function Header({
           onMouseLeave={onSidebarButtonHoverEnd}
           className={`p-1.5 rounded hover:bg-surface-hover transition-colors ${
             sidebarMode === 'open'
-              ? 'text-accent bg-accent/10'
+              ? 'text-accent bg-surface-hover'
               : sidebarMode === 'hide'
-              ? 'text-accent/70 bg-accent/5'
+              ? 'text-accent bg-surface-hover'
               : 'text-text-secondary'
           }`}
           title={`Sidebar: ${sidebarMode} — click to cycle (Ctrl+\`)`}
@@ -225,7 +225,7 @@ export function Header({
             href={releaseUrl}
             target="_blank"
             rel="noreferrer"
-            className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-accent/15 text-accent text-xs font-medium hover:bg-accent/25 transition-colors"
+            className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-accent text-white text-xs font-medium hover:bg-accent-hover transition-colors"
             title={`New version available: v${latest}`}
           >
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -234,7 +234,7 @@ export function Header({
             v{latest} available
           </a>
         ) : upToDate && !checking ? (
-          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 text-xs font-medium">
+          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-600 text-white text-xs font-medium">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <polyline points="20 6 9 17 4 12" />
             </svg>
