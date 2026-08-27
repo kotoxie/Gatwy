@@ -28,6 +28,11 @@ WORKDIR /app
 # Install runtime dependencies (su-exec for privilege drop in entrypoint — pure C, no Go)
 RUN apk add --no-cache ca-certificates curl su-exec openssl
 
+# Opt-in fetch helper only. moonlight-web-stream is NOT copied into the image.
+# ENABLE_MOONLIGHT=1 downloads a pinned release at container start.
+COPY scripts/fetch-moonlight-web.sh /usr/local/bin/fetch-moonlight-web
+RUN chmod +x /usr/local/bin/fetch-moonlight-web
+
 # Copy package files and install production deps only
 COPY package.json package-lock.json* ./
 COPY packages/server/package.json packages/server/
@@ -61,7 +66,8 @@ ENV NODE_ENV=production
 # Enable the OpenSSL legacy provider so SMB NTLM authentication works on modern Node runtimes.
 ENV NODE_OPTIONS="--openssl-legacy-provider"
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+# start-period covers first-boot ENABLE_MOONLIGHT fetch (~15MB) before listen.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s \
   CMD curl -fsk https://localhost:7443/health || exit 1
 
 ENTRYPOINT ["/entrypoint.sh"]

@@ -5,6 +5,15 @@ import { queryAll, queryOne, execute } from '../db/helpers.js';
 import { authRequired, userCan } from '../middleware/auth.js';
 import { encrypt, decrypt } from '../services/encryption.js';
 import { logAudit } from '../services/audit.js';
+import { filterListedConnections, isMoonlightWebAvailable, runtimeFeatures } from '../services/moonlightWeb.js';
+
+const ALL_PROTOCOLS = ['ssh', 'rdp', 'smb', 'vnc', 'moonlight', 'sftp', 'ftp', 'telnet', 'postgres', 'mysql'] as const;
+
+function createProtocols(): readonly string[] {
+  return isMoonlightWebAvailable()
+    ? ALL_PROTOCOLS
+    : ALL_PROTOCOLS.filter((p) => p !== 'moonlight');
+}
 
 const router = Router();
 router.use(authRequired);
@@ -53,14 +62,14 @@ router.get('/', (req: Request, res: Response) => {
     [userId],
   );
 
-  const connections = queryAll<ConnectionRow>(
+  const connections = filterListedConnections(queryAll<ConnectionRow>(
     'SELECT id, name, protocol, host, port, group_id, username, sort_order, shared, tags FROM connections WHERE user_id = ? ORDER BY sort_order, name COLLATE NOCASE ASC',
     [userId],
-  );
+  ));
 
   // Shared connections from other users (shared=1 globally, or shared via connection_shares to this user or role)
   const userRole = req.user!.role;
-  const sharedConnections = queryAll<ConnectionRow>(
+  const sharedConnections = filterListedConnections(queryAll<ConnectionRow>(
     `SELECT DISTINCT c.id, c.name, c.protocol, c.host, c.port, c.username, c.shared, c.user_id, c.tags
      FROM connections c
      WHERE c.user_id != ?
@@ -70,7 +79,7 @@ router.get('/', (req: Request, res: Response) => {
                            OR (cs.share_type = 'role' AND cs.target_id = ?)))
      ORDER BY c.name`,
     [userId, userId, userRole],
-  );
+  ));
 
   // Build tree
   interface GroupNode {
@@ -113,7 +122,7 @@ router.get('/', (req: Request, res: Response) => {
     tags: c.tags ? JSON.parse(c.tags) as string[] : [],
   }));
 
-  res.json({ groups: rootGroups, ungrouped, sharedConnections: sharedMapped });
+  res.json({ groups: rootGroups, ungrouped, sharedConnections: sharedMapped, features: runtimeFeatures() });
 });
 
 // Helper: check if IP is in a private/loopback/link-local range
@@ -189,10 +198,10 @@ router.get('/export', (req: Request, res: Response) => {
     id: string; name: string; protocol: string; host: string;
     port: number; username: string | null; group_id: string | null; shared: number;
   }
-  const connections = queryAll<ExportConn>(
+  const connections = filterListedConnections(queryAll<ExportConn>(
     'SELECT id, name, protocol, host, port, username, group_id, shared FROM connections WHERE user_id = ? ORDER BY sort_order, name COLLATE NOCASE ASC',
     [userId],
-  );
+  ));
   const payload = {
     version: 1,
     exportedAt: new Date().toISOString(),
@@ -244,7 +253,7 @@ router.post('/import', (req: Request, res: Response) => {
 
   for (const c of (connections ?? [])) {
     if (!c.name || !c.protocol || !c.host || !c.port) continue;
-    if (!['ssh', 'rdp', 'smb', 'vnc', 'sftp', 'ftp', 'telnet', 'postgres', 'mysql'].includes(c.protocol)) continue;
+    if (!(ALL_PROTOCOLS as readonly string[]).includes(c.protocol)) continue;
     const newId = uuid();
     const newGroupId = c.groupId ? (groupIdMap.get(c.groupId) ?? null) : null;
     execute(
@@ -281,7 +290,7 @@ router.post('/', (req: Request, res: Response) => {
     return;
   }
 
-  if (!['ssh', 'rdp', 'smb', 'vnc', 'sftp', 'ftp', 'telnet', 'postgres', 'mysql'].includes(protocol)) {
+  if (!createProtocols().includes(protocol)) {
     res.status(400).json({ error: 'Invalid protocol' });
     return;
   }
@@ -362,13 +371,18 @@ router.put('/:id', (req: Request, res: Response) => {
     group_id: string | null;
     user_id: string;
     shared: number;
+    extra_config_json: string | null;
   }
 
   const existing = queryOne<ExistingConnectionRow>(
-    'SELECT id, name, protocol, host, port, username, group_id, user_id, shared FROM connections WHERE id = ?',
+    'SELECT id, name, protocol, host, port, username, group_id, user_id, shared, extra_config_json FROM connections WHERE id = ?',
     [id],
   );
   if (!existing) {
+    res.status(404).json({ error: 'Connection not found' });
+    return;
+  }
+  if (existing.protocol === 'moonlight' && !isMoonlightWebAvailable()) {
     res.status(404).json({ error: 'Connection not found' });
     return;
   }
@@ -396,6 +410,11 @@ router.put('/:id', (req: Request, res: Response) => {
 
   const { name, protocol, host, port, username, password, groupId, privateKey, shared, tunnels, extraConfig, tags, skipCertValidation } = req.body;
 
+  if (protocol !== undefined && !createProtocols().includes(protocol)) {
+    res.status(400).json({ error: 'Invalid protocol' });
+    return;
+  }
+
   // Validate VNC pointer scale on update
   if (extraConfig && (protocol === 'vnc' || (!protocol && existing.protocol === 'vnc'))) {
     const cfg = extraConfig as Record<string, unknown>;
@@ -422,7 +441,21 @@ router.put('/:id', (req: Request, res: Response) => {
   if (groupId !== undefined) { updates.push('group_id = ?'); params.push(groupId || null); }
   if (shared !== undefined) { updates.push('shared = ?'); params.push(shared ? 1 : 0); }
   if (tunnels !== undefined) { updates.push('tunnels_json = ?'); params.push(tunnels ? JSON.stringify(tunnels) : null); }
-  if (extraConfig !== undefined) { updates.push('extra_config_json = ?'); params.push(extraConfig ? JSON.stringify(extraConfig) : null); }
+  if (extraConfig !== undefined) {
+    let nextExtra = extraConfig;
+    if (existing.protocol === 'moonlight' || protocol === 'moonlight') {
+      let prev: Record<string, unknown> = {};
+      try {
+        if (existing.extra_config_json) prev = JSON.parse(existing.extra_config_json) as Record<string, unknown>;
+      } catch { /* ignore */ }
+      nextExtra = {
+        ...prev,
+        ...(extraConfig && typeof extraConfig === 'object' ? extraConfig as Record<string, unknown> : {}),
+      };
+    }
+    updates.push('extra_config_json = ?');
+    params.push(nextExtra ? JSON.stringify(nextExtra) : null);
+  }
   if (tags !== undefined) { updates.push('tags = ?'); params.push(Array.isArray(tags) ? JSON.stringify(tags.map((t: string) => t.trim()).filter(Boolean)) : null); }
   if (skipCertValidation !== undefined) { updates.push('skip_cert_validation = ?'); params.push(skipCertValidation ? 1 : 0); }
 
@@ -504,6 +537,10 @@ router.get('/:id', (req: Request, res: Response) => {
     res.status(404).json({ error: 'Connection not found' });
     return;
   }
+  if (conn.protocol === 'moonlight' && !isMoonlightWebAvailable()) {
+    res.status(404).json({ error: 'Connection not found' });
+    return;
+  }
 
   let tunnels: unknown[] = [];
   try { if (conn.tunnels_json) tunnels = JSON.parse(conn.tunnels_json); } catch { /* ignore */ }
@@ -556,6 +593,10 @@ router.get('/:id/session', (req: Request, res: Response) => {
   );
 
   if (!conn) {
+    res.status(404).json({ error: 'Connection not found' });
+    return;
+  }
+  if (conn.protocol === 'moonlight' && !isMoonlightWebAvailable()) {
     res.status(404).json({ error: 'Connection not found' });
     return;
   }
