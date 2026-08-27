@@ -4,7 +4,7 @@
 ### ![alt text](https://github.com/kotoxie/Gatwy/blob/master/packages/client/public/favicon.png?raw=true) 
 
 
-### Self-host your entire remote access stack in one Docker container — 9 protocols, one interface: RDP, SSH, VNC, Telnet, SMB, SFTP, FTP, MySQL & PostgreSQL.
+### Self-host your entire remote access stack in one Docker container — 10 protocols, one interface: RDP, SSH, VNC, Telnet, SMB, SFTP, FTP, MySQL & PostgreSQL (Optional - Moonlight).
 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -30,7 +30,7 @@ One container. Zero dependencies. Open your browser and connect.
 
 ## ✨ Highlights
 
-- **9 protocols** — RDP (WebAssembly), SSH, VNC, Telnet, SMB, SFTP, FTP, PostgreSQL, MySQL
+- **10 protocols** — RDP (WebAssembly), SSH, VNC, Telnet, SMB, SFTP, FTP, PostgreSQL, MySQL (Optional - Moonlight)
 - **Split-pane workspace** — unlimited sessions side by side with drag-and-drop tabs
 - **Session recording & audit** — encrypted RDP video, SSH asciinema, command-level audit log with auto-redacted passwords, file activity tracking
 - **Granular RBAC** — 27 fine-grained permissions, custom roles, per-connection sharing, protocol-level access control
