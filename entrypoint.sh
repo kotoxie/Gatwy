@@ -15,7 +15,7 @@ case "$ml_flag" in
     # Official x86_64 moonlight-web builds are glibc. gcompat is best-effort on Alpine.
     if [ -f /etc/alpine-release ]; then
       echo "[Gatwy] ENABLE_MOONLIGHT set; installing gcompat for glibc moonlight-web binaries"
-      apk add --no-cache gcompat || echo "[Gatwy] warning: apk add gcompat failed"
+      apk add --no-cache gcompat || echo "[Gatwy] WARNING: apk add gcompat failed — moonlight-web may fail to start. Ensure outbound network access is available during container startup, or use a glibc-based host OS."
     fi
     if [ ! -x "$dest/web-server" ] || [ ! -x "$dest/streamer" ]; then
       echo "[Gatwy] ENABLE_MOONLIGHT=$ENABLE_MOONLIGHT: fetching moonlight-web-stream (GPL-3.0) into $dest"

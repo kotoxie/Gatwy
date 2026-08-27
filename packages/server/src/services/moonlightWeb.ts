@@ -279,7 +279,15 @@ function spawnMoonlightWeb(): Promise<void> {
     ],
     {
       cwd: binDir,
-      env: { ...process.env },
+      // Pass only what the binary needs — never expose Gatwy secrets to the child.
+      env: {
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        TMPDIR: process.env.TMPDIR,
+        TMP: process.env.TMP,
+        TEMP: process.env.TEMP,
+        USER: process.env.USER,
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );

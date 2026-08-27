@@ -85,6 +85,9 @@ export function setupMoonlightProxy(server: Server, app: import('express').Expre
 
     const headers: http.OutgoingHttpHeaders = { ...req.headers, host: `${upstream.host}:${upstream.port}` };
     headers[header.name] = header.value;
+    // Don't forward Gatwy credentials to the third-party binary.
+    delete headers['authorization'];
+    delete headers['cookie'];
     delete headers['content-length'];
 
     const proxyReq = http.request(
@@ -145,6 +148,8 @@ export function setupMoonlightProxy(server: Server, app: import('express').Expre
       const upstream = moonlightUpstream();
       const headers: http.OutgoingHttpHeaders = { ...req.headers, host: `${upstream.host}:${upstream.port}` };
       headers[header.name] = header.value;
+      delete headers['authorization'];
+      delete headers['cookie'];
 
       const proxyReq = http.request({
         host: upstream.host,
