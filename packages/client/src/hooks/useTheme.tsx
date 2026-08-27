@@ -21,6 +21,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
     localStorage.setItem('gatwy-theme', theme);
+    const color = theme === 'dark' ? '#141414' : '#ffffff';
+    document.querySelectorAll('meta[name="theme-color"]').forEach((el) => {
+      el.setAttribute('content', color);
+      el.removeAttribute('media');
+    });
+    const statusBar = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+    if (statusBar) statusBar.setAttribute('content', theme === 'dark' ? 'black' : 'default');
   }, [theme]);
 
   const toggleTheme = useCallback(() => {

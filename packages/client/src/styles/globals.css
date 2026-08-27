@@ -35,6 +35,13 @@
   --accent-hover: #60a5fa;
 }
 
+html, body, #root {
+  height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background-color: var(--surface);
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;

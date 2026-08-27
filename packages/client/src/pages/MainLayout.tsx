@@ -671,7 +671,7 @@ export function MainLayout() {
   );
 
   return (
-    <div className="flex flex-col h-screen bg-surface select-none">
+    <div className="flex flex-col h-dvh overflow-hidden overscroll-none bg-surface select-none">
       <IdleMonitor />
       <Header
         sidebarMode={sidebarMode}
