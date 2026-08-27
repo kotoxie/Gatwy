@@ -8,6 +8,10 @@ let db: Database;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let SqlModule: any;
 
+// Carries quarantine info from openOrRecoverDatabase to initDb so the audit log
+// can be written after the fresh DB is fully initialised.
+let lastQuarantineInfo: { path: string; reason: string } | undefined;
+
 export function getDb(): Database {
   if (!db) {
     throw new Error('Database not initialized. Call initDb() first.');
@@ -67,6 +71,8 @@ function quarantineCorruptDb(reason: string): void {
       fs.renameSync(side, `${side}.corrupt-${ts}`);
     } catch { /* ignore */ }
   }
+
+  lastQuarantineInfo = { path: quarantinePath, reason };
 }
 
 /** Returns null if OK, otherwise a short reason string. */
@@ -151,6 +157,20 @@ export async function initDb(): Promise<Database> {
   process.on('beforeExit', () => { try { saveDb(); } catch { /* ignore */ } });
   process.on('exit', () => { try { saveDb(); } catch { /* ignore */ } });
 
+  // Emit a critical audit event if the DB was quarantined on this startup.
+  // Dynamic import avoids the circular dependency: db/index → audit → db/helpers → db/index.
+  if (lastQuarantineInfo) {
+    const info = lastQuarantineInfo;
+    lastQuarantineInfo = undefined;
+    import('../services/audit.js').then(({ logAudit }) => {
+      logAudit({
+        eventType: 'db.quarantined',
+        target: info.path,
+        details: { reason: info.reason },
+      });
+    }).catch(() => { /* ignore */ });
+  }
+
   return db;
 }
 
@@ -161,6 +181,11 @@ export function persistDb(): void {
 export function restoreDbFromBytes(bytes: Buffer): void {
   const next = new SqlModule.Database(bytes) as Database;
   applyDbPragmas(next);
+  const failure = integrityFailureReason(next);
+  if (failure) {
+    try { next.close(); } catch { /* ignore */ }
+    throw new Error(`Backup integrity check failed: ${failure}`);
+  }
   const prev = db;
   db = next;
   try {
