@@ -8,7 +8,6 @@ const FONT_FAMILIES = [
   { key: 'inconsolata',     label: 'Inconsolata',     css: '"Inconsolata", monospace' },
   { key: 'ubuntu-mono',     label: 'Ubuntu Mono',     css: '"Ubuntu Mono", monospace' },
   { key: 'roboto-mono',     label: 'Roboto Mono',     css: '"Roboto Mono", monospace' },
-  { key: 'hack',            label: 'Hack',            css: '"Hack", monospace' },
 ] as const;
 
 type FontFamilyKey = (typeof FONT_FAMILIES)[number]['key'];
@@ -139,6 +138,9 @@ function SshPreview({
           <span style={{ color: t.blue }}>~</span>
           <span style={{ color: t.fg }}>$ </span>
           <span style={{ color: t.fg }}>ls -la /var/log</span>
+        </div>
+        <div>
+          <span style={{ color: t.brightBlack }}># 0O1lI -&gt; =&gt; != {'{}'} [] ()</span>
         </div>
         <div>
           <span style={{ color: t.blue }}>drwxr-xr-x</span>
