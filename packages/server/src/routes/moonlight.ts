@@ -5,6 +5,7 @@ import { authRequired } from '../middleware/auth.js';
 import { userHasPermission, wsCanAccess } from '../services/permissions.js';
 import { logAudit } from '../services/audit.js';
 import { resolveClientIp } from '../services/ip.js';
+import { resolveMoonlightHostAddress } from '../services/moonlightAddress.js';
 import {
   ensureMoonlightWeb,
   getMoonlightRuntimeError,
@@ -81,6 +82,7 @@ async function ensureHost(conn: ConnRow, extra: MoonlightExtraConfig): Promise<{
   await ensureMoonlightWeb();
 
   const httpPort = resolveHttpPort(conn.port, extra);
+  const address = await resolveMoonlightHostAddress(conn.host);
   let hostId = extra.mlHostId;
 
   if (hostId) {
@@ -90,19 +92,24 @@ async function ensureHost(conn: ConnRow, extra: MoonlightExtraConfig): Promise<{
     }
     try {
       const host = await mlwGetHost(hostId);
-      return {
-        hostId,
-        extra: mergeMoonlightExtra(extra, {
-          mlHostId: hostId,
-          paired: host.paired === 'Paired',
-        }),
-      };
+      if (host.address === address) {
+        return {
+          hostId,
+          extra: mergeMoonlightExtra(extra, {
+            mlHostId: hostId,
+            paired: host.paired === 'Paired',
+          }),
+        };
+      }
+      // moonlight-common RTSP requires an IP literal; replace hosts stored as DNS names.
+      try { await mlwDeleteHost(hostId); } catch { /* recreate below */ }
+      hostId = undefined;
     } catch {
       hostId = undefined;
     }
   }
 
-  const host = await mlwAddHost(conn.host, httpPort);
+  const host = await mlwAddHost(address, httpPort);
   const next = mergeMoonlightExtra(extra, {
     mlHostId: host.host_id,
     httpPort,

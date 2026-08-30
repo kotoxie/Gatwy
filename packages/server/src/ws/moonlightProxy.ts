@@ -10,6 +10,7 @@ import {
   moonlightUpstream,
 } from '../services/moonlightWeb.js';
 import { authorizeMoonlightAccess } from './moonlightAuth.js';
+import { injectGatwyMoonlightChrome, shouldThemeMoonlightHtml } from './moonlightChrome.js';
 
 const PREFIX = '/mlw';
 
@@ -103,8 +104,29 @@ export function setupMoonlightProxy(server: Server, app: import('express').Expre
         delete outHeaders['content-security-policy'];
         delete outHeaders['content-security-policy-report-only'];
         outHeaders['content-security-policy'] = MLW_FRAME_CSP;
-        res.writeHead(proxyRes.statusCode ?? 502, outHeaders);
-        proxyRes.pipe(res);
+
+        const contentType = String(proxyRes.headers['content-type'] || '');
+        const encoding = String(proxyRes.headers['content-encoding'] || '');
+        // stream.html only: inject Gatwy HUD CSS/script before moonlight-web JS runs.
+        const themeHtml = shouldThemeMoonlightHtml(targetPath)
+          && contentType.includes('text/html')
+          && (!encoding || encoding === 'identity');
+
+        if (!themeHtml) {
+          res.writeHead(proxyRes.statusCode ?? 502, outHeaders);
+          proxyRes.pipe(res);
+          return;
+        }
+
+        const chunks: Buffer[] = [];
+        proxyRes.on('data', (chunk) => chunks.push(chunk));
+        proxyRes.on('end', () => {
+          const html = injectGatwyMoonlightChrome(Buffer.concat(chunks).toString('utf8'));
+          const body = Buffer.from(html, 'utf8');
+          outHeaders['content-length'] = body.length;
+          res.writeHead(proxyRes.statusCode ?? 502, outHeaders);
+          res.end(body);
+        });
       },
     );
 
