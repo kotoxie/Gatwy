@@ -16,14 +16,15 @@
 set -eu
 
 DEST="${1:-/opt/moonlight-web}"
-VERSION="${2:-v2.10.0}"
+VERSION="${2:-v3.0.0-prerelease.5}"
 ARCH_HINT="${3:-${TARGETARCH:-}}"
 
-# GitHub release asset digests for moonlight-web-stream v2.10.0
-# https://github.com/MrCreativ3001/moonlight-web-stream/releases/tag/v2.10.0
-PINNED_SHA_x86_64_unknown_linux_gnu=b17fa535676a1c118bc1eb009134644cab98190b36a0776fb1b4a505d569f5eb
-PINNED_SHA_aarch64_unknown_linux_gnu=1a6bb6845756883671a5a783c0797367e84166c8210f8cfa51059f434f0e5a3a
-PINNED_SHA_aarch64_unknown_linux_musl=f008a5bfee1e22386564d28308bf00bdde0b33732de74a56858bc013942d2bb0
+# GitHub release asset digests for moonlight-web-stream v3.0.0-prerelease.5
+# https://github.com/MrCreativ3001/moonlight-web-stream/releases/tag/v3.0.0-prerelease.5
+PINNED_SHA_x86_64_unknown_linux_gnu=a8371ae6c614d672737cf2fa7dfb61fd46627a45f5c4187480e258e4489327c2
+PINNED_SHA_x86_64_unknown_linux_musl=bda8c825db233a50e2500d5bcfd93267ce4d2adc774bd964f325967133ba5b62
+PINNED_SHA_aarch64_unknown_linux_gnu=eab9866eec4991db5884d95886cc4f3bec9695fa9e9e052cc64f19b6a72a7226
+PINNED_SHA_aarch64_unknown_linux_musl=3f5bb7f1b44f16beaf06f946e7dea29f3cb07834c50e18a5e6a2a1966d1e7023
 
 echo "moonlight-web-stream is licensed under GPL-3.0."
 echo "Source:  https://github.com/MrCreativ3001/moonlight-web-stream"
@@ -51,9 +52,14 @@ LIBC="$(detect_libc)"
 
 case "$ARCH_HINT" in
   amd64|x86_64)
-    # Upstream does not publish an x86_64 musl tarball for v2.10.0.
-    ML_ARCH=x86_64-unknown-linux-gnu
-    EXPECTED_SHA="$PINNED_SHA_x86_64_unknown_linux_gnu"
+    # gnu x86_64 does not run on Alpine; v3 publishes musl.
+    if [ "$LIBC" = musl ]; then
+      ML_ARCH=x86_64-unknown-linux-musl
+      EXPECTED_SHA="$PINNED_SHA_x86_64_unknown_linux_musl"
+    else
+      ML_ARCH=x86_64-unknown-linux-gnu
+      EXPECTED_SHA="$PINNED_SHA_x86_64_unknown_linux_gnu"
+    fi
     ;;
   arm64|aarch64)
     if [ "$LIBC" = musl ]; then
@@ -70,9 +76,9 @@ case "$ARCH_HINT" in
     ;;
 esac
 
-if [ "$VERSION" != "v2.10.0" ]; then
+if [ "$VERSION" != "v3.0.0-prerelease.5" ]; then
   echo "Refusing unpinned moonlight-web-stream version: $VERSION" >&2
-  echo "This script only installs v2.10.0 with a baked-in SHA-256." >&2
+  echo "This script only installs v3.0.0-prerelease.5 with a baked-in SHA-256." >&2
   exit 1
 fi
 
@@ -126,16 +132,16 @@ if [ ! -f "$EXTRACT/web-server" ] && [ -f "$EXTRACT/package/web-server" ]; then
   EXTRACT="$EXTRACT/package"
 fi
 
-if [ ! -f "$EXTRACT/web-server" ] || [ ! -f "$EXTRACT/streamer" ]; then
-  echo "Release archive is missing web-server and/or streamer" >&2
+if [ ! -f "$EXTRACT/web-server" ]; then
+  echo "Release archive is missing web-server" >&2
   exit 1
 fi
 
-chmod +x "$EXTRACT/web-server" "$EXTRACT/streamer"
+chmod +x "$EXTRACT/web-server"
 
 mkdir -p "$DEST"
 cp -a "$EXTRACT"/. "$DEST"/
-chmod +x "$DEST/web-server" "$DEST/streamer"
+chmod +x "$DEST/web-server"
 
 echo "moonlight-web-stream installed at $DEST"
 echo "Gatwy looks for moonlight-web at /opt/moonlight-web."

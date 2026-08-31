@@ -65,7 +65,7 @@ function bindHostPort(): { host: string; port: number } {
   return { host: host || '127.0.0.1', port: parseInt(portStr || '19080', 10) };
 }
 
-function writeConfig(dir: string, binDir: string): string {
+function writeConfig(dir: string): string {
   fs.mkdirSync(dir, { recursive: true });
   const configPath = path.join(dir, 'config.json');
   const { host, port } = bindHostPort();
@@ -90,7 +90,6 @@ function writeConfig(dir: string, binDir: string): string {
       default_http_port: 47989,
       pair_device_name: 'Gatwy',
     },
-    streamer_path: path.join(binDir, 'streamer'),
     webrtc: {
       port_range: { min: WEBRTC_PORT_MIN, max: WEBRTC_PORT_MAX },
       ice_servers: [
@@ -172,8 +171,7 @@ export const MOONLIGHT_UNAVAILABLE_BODY = {
 
 export function moonlightBinariesPresent(dir: string | undefined | null): boolean {
   if (!dir) return false;
-  return fs.existsSync(path.join(dir, 'web-server'))
-    && fs.existsSync(path.join(dir, 'streamer'));
+  return fs.existsSync(path.join(dir, 'web-server'));
 }
 
 export function isMoonlightWebAvailable(): boolean {
@@ -254,16 +252,14 @@ function spawnMoonlightWeb(): Promise<void> {
 
   const binDir = resolveBinaryDir();
   const dir = moonlightDir();
-  const configPath = writeConfig(dir, binDir);
+  const configPath = writeConfig(dir);
   const webServer = path.join(binDir, 'web-server');
-  const streamer = path.join(binDir, 'streamer');
 
   try {
     fs.chmodSync(webServer, 0o755);
-    fs.chmodSync(streamer, 0o755);
   } catch { /* ignore */ }
 
-  console.log(`[Moonlight] Starting web-server from ${binDir} (streamer=${streamer})`);
+  console.log(`[Moonlight] Starting web-server from ${binDir}`);
   const earlyStderr: string[] = [];
   let earlyStderrLen = 0;
   child = spawn(
@@ -273,7 +269,6 @@ function spawnMoonlightWeb(): Promise<void> {
       '--bind-address', DEFAULT_BIND,
       '--path-prefix', PATH_PREFIX,
       '--forwarded-header', MLW_HEADER,
-      '--streamer-path', streamer,
       '--webrtc-port-range', `${WEBRTC_PORT_MIN}:${WEBRTC_PORT_MAX}`,
       'run',
     ],

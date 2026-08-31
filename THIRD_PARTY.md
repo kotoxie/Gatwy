@@ -10,12 +10,15 @@ Gatwy is MIT-licensed. See [LICENSE](LICENSE).
 - It is **not** vendored in this repository.
 - `scripts/fetch-moonlight-web.sh` downloads a **pinned** GitHub release and verifies a baked-in SHA-256. A mismatch or unknown target exits non-zero.
 
-Pinned release: **v2.10.0**
+Pinned release: **v3.0.0-prerelease.5**
+
+Alpine (musl) images fetch the musl assets so the binary can run in-process. glibc hosts fetch the gnu assets.
 
 | Asset | SHA-256 |
 | --- | --- |
-| `moonlight-web-x86_64-unknown-linux-gnu.tar.gz` | `b17fa535676a1c118bc1eb009134644cab98190b36a0776fb1b4a505d569f5eb` |
-| `moonlight-web-aarch64-unknown-linux-gnu.tar.gz` | `1a6bb6845756883671a5a783c0797367e84166c8210f8cfa51059f434f0e5a3a` |
-| `moonlight-web-aarch64-unknown-linux-musl.tar.gz` | `f008a5bfee1e22386564d28308bf00bdde0b33732de74a56858bc013942d2bb0` |
+| `moonlight-web-x86_64-unknown-linux-musl.tar.gz` | `bda8c825db233a50e2500d5bcfd93267ce4d2adc774bd964f325967133ba5b62` |
+| `moonlight-web-x86_64-unknown-linux-gnu.tar.gz` | `a8371ae6c614d672737cf2fa7dfb61fd46627a45f5c4187480e258e4489327c2` |
+| `moonlight-web-aarch64-unknown-linux-gnu.tar.gz` | `eab9866eec4991db5884d95886cc4f3bec9695fa9e9e052cc64f19b6a72a7226` |
+| `moonlight-web-aarch64-unknown-linux-musl.tar.gz` | `3f5bb7f1b44f16beaf06f946e7dea29f3cb07834c50e18a5e6a2a1966d1e7023` |
 
 Source and license: https://github.com/MrCreativ3001/moonlight-web-stream

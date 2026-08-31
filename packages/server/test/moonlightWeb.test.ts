@@ -6,6 +6,7 @@ import { describe, it } from 'node:test';
 import {
   moonlightBinariesPresent,
   moonlightUnavailablePayload,
+  moonlightUpstream,
   MOONLIGHT_UNAVAILABLE_BODY,
   MOONLIGHT_MISSING_HINT,
   filterListedConnections,
@@ -20,22 +21,27 @@ describe('moonlightBinariesPresent', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gatwy-mlw-'));
     try {
       assert.equal(moonlightBinariesPresent(dir), false);
-      fs.writeFileSync(path.join(dir, 'web-server'), '');
-      assert.equal(moonlightBinariesPresent(dir), false);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it('is true only when web-server and streamer both exist', () => {
+  it('is true when web-server exists (v3 embeds streamer)', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gatwy-mlw-'));
     try {
       fs.writeFileSync(path.join(dir, 'web-server'), '');
-      fs.writeFileSync(path.join(dir, 'streamer'), '');
       assert.equal(moonlightBinariesPresent(dir), true);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('moonlightUpstream', () => {
+  it('points at loopback, not a sidecar hostname', () => {
+    const upstream = moonlightUpstream();
+    assert.equal(upstream.host, '127.0.0.1');
+    assert.equal(upstream.port, 19080);
   });
 });
 
@@ -73,5 +79,6 @@ describe('MOONLIGHT_MISSING_HINT', () => {
     assert.doesNotMatch(MOONLIGHT_MISSING_HINT, /MOONLIGHT_DOWNLOAD/);
     assert.doesNotMatch(MOONLIGHT_MISSING_HINT, /INCLUDE_MOONLIGHT/);
     assert.doesNotMatch(MOONLIGHT_MISSING_HINT, /MOONLIGHT_WEB_DIR/);
+    assert.doesNotMatch(MOONLIGHT_MISSING_HINT, /sidecar/i);
   });
 });
