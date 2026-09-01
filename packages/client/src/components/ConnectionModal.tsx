@@ -665,58 +665,91 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill,
             </div>
           )}
 
-          {/* Folder selector */}
-          <div>
-            <label className="block text-xs font-medium text-text-secondary mb-1">Folder</label>
-            <select
-              value={groupId}
-              onChange={(e) => setGroupId(e.target.value)}
-              className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent"
-            >
-              <option value="">No Folder</option>
-              {localGroups.map((g) => (
-                <option key={g.id} value={g.id}>{g.name}</option>
-              ))}
-            </select>
+          {/* Folder selector + Tags, merged into one row to save space */}
+          <div className="flex gap-3">
+            <div className="flex-1 min-w-0">
+              <label className="block text-xs font-medium text-text-secondary mb-1">Folder</label>
+              {showNewFolder ? (
+                <div className="flex gap-1">
+                  <input
+                    ref={newFolderInputRef}
+                    autoFocus
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') { e.preventDefault(); handleCreateFolder(); }
+                      if (e.key === 'Escape') { setShowNewFolder(false); setNewFolderName(''); }
+                    }}
+                    placeholder="Folder name"
+                    className="flex-1 min-w-0 px-2 py-1.5 text-sm bg-surface border border-border rounded text-text-primary focus:outline-hidden focus:ring-1 focus:ring-accent"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCreateFolder}
+                    className="px-2 py-1 text-sm bg-accent text-white rounded hover:bg-accent-hover"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShowNewFolder(false); setNewFolderName(''); }}
+                    className="px-2 py-1 text-sm border border-border rounded text-text-secondary hover:bg-surface-hover"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <select
+                  value={groupId}
+                  onChange={(e) => setGroupId(e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent"
+                >
+                  <option value="">No Folder</option>
+                  {localGroups.map((g) => (
+                    <option key={g.id} value={g.id}>{g.name}</option>
+                  ))}
+                </select>
+              )}
 
-            {showNewFolder ? (
-              <div className="flex gap-1 mt-1">
-                <input
-                  ref={newFolderInputRef}
-                  autoFocus
-                  value={newFolderName}
-                  onChange={(e) => setNewFolderName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') { e.preventDefault(); handleCreateFolder(); }
-                    if (e.key === 'Escape') { setShowNewFolder(false); setNewFolderName(''); }
-                  }}
-                  placeholder="Folder name"
-                  className="flex-1 min-w-0 px-2 py-1 text-sm bg-surface border border-border rounded text-text-primary focus:outline-hidden focus:ring-1 focus:ring-accent"
-                />
+              {!showNewFolder && (
                 <button
                   type="button"
-                  onClick={handleCreateFolder}
-                  className="px-2 py-1 text-sm bg-accent text-white rounded hover:bg-accent-hover"
+                  onClick={() => setShowNewFolder(true)}
+                  className="mt-1 text-xs text-accent hover:text-accent-hover"
                 >
-                  ✓
+                  + Create new folder
                 </button>
-                <button
-                  type="button"
-                  onClick={() => { setShowNewFolder(false); setNewFolderName(''); }}
-                  className="px-2 py-1 text-sm border border-border rounded text-text-secondary hover:bg-surface-hover"
-                >
-                  ✕
-                </button>
+              )}
+            </div>
+
+            <div className="flex-1 min-w-0">
+              <label className="block text-xs font-medium text-text-secondary mb-1">Tags</label>
+              <div className="flex flex-wrap gap-1 mb-1.5">
+                {tags.map((tag) => (
+                  <span key={tag} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-accent/15 text-accent text-xs">
+                    {tag}
+                    <button type="button" onClick={() => setTags(tags.filter((t) => t !== tag))} className="hover:text-red-400 text-[10px] leading-none">×</button>
+                  </span>
+                ))}
               </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setShowNewFolder(true)}
-                className="mt-1 text-xs text-accent hover:text-accent-hover"
-              >
-                + Create new folder
-              </button>
-            )}
+              <input
+                type="text"
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ',') {
+                    e.preventDefault();
+                    const val = tagInput.trim();
+                    if (val && !tags.includes(val)) setTags([...tags, val]);
+                    setTagInput('');
+                  } else if (e.key === 'Backspace' && !tagInput && tags.length > 0) {
+                    setTags(tags.slice(0, -1));
+                  }
+                }}
+                placeholder="Type and press Enter to add tags..."
+                className="w-full px-2 py-1 text-xs rounded bg-surface border border-border text-text-primary"
+              />
+            </div>
           </div>
 
           {protocol === 'smb' && (
@@ -853,36 +886,6 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill,
               </div>
             </div>
           )}
-
-          {/* Tags */}
-          <div>
-            <label className="block text-xs font-medium text-text-secondary mb-1">Tags</label>
-            <div className="flex flex-wrap gap-1 mb-1.5">
-              {tags.map((tag) => (
-                <span key={tag} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-accent/15 text-accent text-xs">
-                  {tag}
-                  <button type="button" onClick={() => setTags(tags.filter((t) => t !== tag))} className="hover:text-red-400 text-[10px] leading-none">×</button>
-                </span>
-              ))}
-            </div>
-            <input
-              type="text"
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ',') {
-                  e.preventDefault();
-                  const val = tagInput.trim();
-                  if (val && !tags.includes(val)) setTags([...tags, val]);
-                  setTagInput('');
-                } else if (e.key === 'Backspace' && !tagInput && tags.length > 0) {
-                  setTags(tags.slice(0, -1));
-                }
-              }}
-              placeholder="Type and press Enter to add tags..."
-              className="w-full px-2 py-1 text-xs rounded bg-surface border border-border text-text-primary"
-            />
-          </div>
 
           {/* Sharing — collapsible */}
           <div className="border border-border rounded overflow-hidden">
