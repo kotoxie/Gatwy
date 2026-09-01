@@ -724,14 +724,16 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill,
 
             <div className="flex-1 min-w-0">
               <label className="block text-xs font-medium text-text-secondary mb-1">Tags</label>
-              <div className="flex flex-wrap gap-1 mb-1.5">
-                {tags.map((tag) => (
-                  <span key={tag} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-accent/15 text-accent text-xs">
-                    {tag}
-                    <button type="button" onClick={() => setTags(tags.filter((t) => t !== tag))} className="hover:text-red-400 text-[10px] leading-none">×</button>
-                  </span>
-                ))}
-              </div>
+              {tags.length > 0 && (
+                <div className="flex flex-wrap gap-1 mb-1.5">
+                  {tags.map((tag) => (
+                    <span key={tag} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-accent/15 text-accent text-xs">
+                      {tag}
+                      <button type="button" onClick={() => setTags(tags.filter((t) => t !== tag))} className="hover:text-red-400 text-[10px] leading-none">×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
               <input
                 type="text"
                 value={tagInput}
@@ -747,7 +749,7 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill,
                   }
                 }}
                 placeholder="Type and press Enter to add tags..."
-                className="w-full px-2 py-1 text-xs rounded bg-surface border border-border text-text-primary"
+                className="w-full px-2.5 py-1.5 bg-surface border border-border rounded text-sm text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent"
               />
             </div>
           </div>
