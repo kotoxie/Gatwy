@@ -41,14 +41,14 @@ function mapStatus(s: SessionStatus): 'connecting' | 'connected' | 'disconnected
   return 'connecting';
 }
 
-function preferWebsocketTransport(): void {
+/** moonlight-web reads mlSettings from localStorage before painting the HUD. */
+function applyMoonlightChrome(): void {
   try {
     const raw = localStorage.getItem('mlSettings');
     const settings = raw ? JSON.parse(raw) as Record<string, unknown> : {};
-    if (settings.dataTransport !== 'websocket' && settings.dataTransport !== 'webrtc') {
-      settings.dataTransport = 'websocket';
-      localStorage.setItem('mlSettings', JSON.stringify(settings));
-    }
+    settings.dataTransport = 'websocket';
+    settings.sidebarEdge = 'right';
+    localStorage.setItem('mlSettings', JSON.stringify(settings));
   } catch { /* ignore */ }
 }
 
@@ -59,8 +59,6 @@ export function MoonlightSession({
   onStatusChange,
   onClose,
 }: MoonlightSessionProps) {
-  const sessionRef = useRef<HTMLDivElement>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
   const sessionIdRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -69,7 +67,6 @@ export function MoonlightSession({
   const [pin, setPin] = useState<string | null>(null);
   const [showPairModal, setShowPairModal] = useState(false);
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
-  const [appTitle, setAppTitle] = useState('Desktop');
   const [hostLabel, setHostLabel] = useState(connectionName);
   const [bitrate, setBitrate] = useState(20000);
   const [fps, setFps] = useState(60);
@@ -97,28 +94,6 @@ export function MoonlightSession({
     setStreamUrl(null);
     onClose?.();
   }, [auditDisconnect, onClose]);
-
-  const handleFullscreen = useCallback(() => {
-    const el = sessionRef.current;
-    if (!el) return;
-    if (document.fullscreenElement) {
-      void document.exitFullscreen();
-    } else {
-      void el.requestFullscreen().catch(() => undefined);
-    }
-  }, []);
-
-  const forgetPairing = useCallback(async () => {
-    try {
-      await fetch(`/api/v1/moonlight/${connectionId}/pairing`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-    } catch { /* ignore */ }
-    setStreamUrl(null);
-    setPin(null);
-    setReconnectCount((n) => n + 1);
-  }, [connectionId]);
 
   const startPairing = useCallback(async (signal: AbortSignal) => {
     setShowPairModal(true);
@@ -168,7 +143,7 @@ export function MoonlightSession({
   }, [connectionId]);
 
   const startStream = useCallback(async (signal: AbortSignal) => {
-    preferWebsocketTransport();
+    applyMoonlightChrome();
     const res = await fetch(`/api/v1/moonlight/${connectionId}/session`, {
       method: 'POST',
       credentials: 'include',
@@ -183,7 +158,6 @@ export function MoonlightSession({
     if (!res.ok) throw new Error(data.error || `Failed to start stream (${res.status})`);
 
     sessionIdRef.current = data.sessionId;
-    setAppTitle(data.appTitle);
     setBitrate(data.bitrateKbps);
     setFps(data.fps);
     setStreamUrl(data.streamPath);
@@ -249,106 +223,45 @@ export function MoonlightSession({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connectionId, isActive, reconnectCount]);
 
+  useEffect(() => {
+    function onMessage(event: MessageEvent) {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data as { source?: string; type?: string } | null;
+      if (data?.source === 'gatwy-mlw' && data.type === 'exit') {
+        handleDisconnect();
+      }
+    }
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [handleDisconnect]);
+
   return (
-    <div ref={sessionRef} className="absolute inset-0 bg-black flex flex-col">
-      <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-alt border-b border-border/40 shrink-0 text-xs text-text-secondary">
-        <span
-          className={`w-2 h-2 rounded-full shrink-0 ${
-            status === 'streaming'
-              ? 'bg-green-500'
-              : status === 'disconnected'
-              ? 'bg-red-500'
-              : 'bg-yellow-500'
-          }`}
+    <div className="absolute inset-0 bg-black overflow-hidden">
+      {streamUrl && status === 'streaming' ? (
+        <iframe
+          title={`Moonlight ${connectionName}`}
+          src={streamUrl}
+          className="absolute inset-0 w-full h-full border-0"
+          allow="fullscreen; autoplay; clipboard-read; clipboard-write; gamepad"
         />
-        <span className="font-medium text-text-primary">{connectionName}</span>
-        <span className="opacity-50">Moonlight</span>
-        {appTitle && status === 'streaming' && <span className="opacity-50">{appTitle}</span>}
-        {status === 'connecting' && <span className="opacity-50">Connecting…</span>}
-        {status === 'pairing' && <span className="opacity-50">Waiting for PIN…</span>}
-        {status === 'streaming' && (
-          <span className="opacity-50">{Math.round(bitrate / 1000)} Mbps · {fps} fps</span>
-        )}
-        {errorMsg && !showPairModal && <span className="text-red-400 ml-auto truncate max-w-[40%]">{errorMsg}</span>}
-        <div className={`flex items-center gap-1 ${errorMsg && !showPairModal ? '' : 'ml-auto'}`}>
-          <label className="flex items-center gap-1 opacity-70">
-            <span>Mbps</span>
-            <input
-              type="number"
-              min={1}
-              max={150}
-              value={Math.round(bitrate / 1000)}
-              onChange={(e) => setBitrate(Math.max(1, parseInt(e.target.value, 10) || 20) * 1000)}
-              className="w-12 bg-surface border border-border rounded px-1 py-0.5 text-[11px]"
-              title="Bitrate (applies on reconnect)"
-            />
-          </label>
-          <label className="flex items-center gap-1 opacity-70">
-            <span>FPS</span>
-            <input
-              type="number"
-              min={15}
-              max={240}
-              value={fps}
-              onChange={(e) => setFps(Math.max(15, parseInt(e.target.value, 10) || 60))}
-              className="w-12 bg-surface border border-border rounded px-1 py-0.5 text-[11px]"
-              title="FPS (applies on reconnect)"
-            />
-          </label>
-          <button
-            type="button"
-            onClick={handleFullscreen}
-            className="px-2 py-1 rounded border border-border/60 hover:bg-surface"
-            title="Fullscreen"
-          >
-            Fullscreen
-          </button>
-          <button
-            type="button"
-            onClick={() => void forgetPairing()}
-            className="px-2 py-1 rounded border border-border/60 hover:bg-surface"
-            title="Forget pairing and re-pair"
-          >
-            Forget pairing
-          </button>
-          <button
-            type="button"
-            onClick={handleDisconnect}
-            className="px-2 py-1 rounded border border-red-500/40 text-red-400 hover:bg-red-500/10"
-          >
-            Disconnect
-          </button>
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center text-sm text-text-secondary">
+          {status === 'pairing' ? 'Waiting for Sunshine PIN confirmation…' : 'Preparing Moonlight stream…'}
         </div>
-      </div>
+      )}
 
-      <div className="flex-1 relative overflow-hidden bg-black">
-        {streamUrl && status === 'streaming' ? (
-          <iframe
-            ref={iframeRef}
-            title={`Moonlight ${connectionName}`}
-            src={streamUrl}
-            className="absolute inset-0 w-full h-full border-0"
-            allow="fullscreen; autoplay; clipboard-read; clipboard-write; gamepad"
-          />
-        ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-sm text-text-secondary">
-            {status === 'pairing' ? 'Waiting for Sunshine PIN confirmation…' : 'Preparing Moonlight stream…'}
-          </div>
-        )}
-
-        {showPairModal && (
-          <MoonlightPairModal
-            pin={pin}
-            hostLabel={hostLabel}
-            error={status === 'disconnected' ? errorMsg : undefined}
-            onCancel={handleDisconnect}
-            onRetry={() => {
-              setErrorMsg('');
-              setReconnectCount((n) => n + 1);
-            }}
-          />
-        )}
-      </div>
+      {showPairModal && (
+        <MoonlightPairModal
+          pin={pin}
+          hostLabel={hostLabel}
+          error={status === 'disconnected' ? errorMsg : undefined}
+          onCancel={handleDisconnect}
+          onRetry={() => {
+            setErrorMsg('');
+            setReconnectCount((n) => n + 1);
+          }}
+        />
+      )}
 
       <DisconnectOverlay
         show={status === 'disconnected' && !showPairModal}

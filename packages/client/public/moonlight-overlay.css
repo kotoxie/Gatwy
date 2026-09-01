@@ -1,0 +1,247 @@
+/* Overlay for proxied /mlw/stream.html. Dark tokens: the canvas is always black. */
+
+html.stream {
+  --surface: #141414;
+  --surface-alt: #1c1c1c;
+  --surface-hover: #272727;
+  --border: #2e2e2e;
+  --text-primary: #efefef;
+  --text-secondary: #888888;
+  --accent: #3b82f6;
+  --accent-hover: #60a5fa;
+}
+
+html.stream,
+html.stream body.stream {
+  background: #000 !important;
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 13px;
+  text-shadow: none;
+}
+
+html.stream body.stream::before {
+  display: none !important;
+}
+
+/* moonlight-web defaults the HUD to the left and applies sidebar-edge-* after paint. */
+
+html.stream .sidebar-overlay {
+  top: 50% !important;
+  left: auto !important;
+  right: 0 !important;
+  z-index: 40;
+}
+
+html.stream .sidebar-background {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0 !important;
+}
+
+html.stream .sidebar-overlay:not(.sidebar-show) .sidebar-background {
+  transform: translate(calc(100% - 28px), -50%) !important;
+}
+
+html.stream .sidebar-overlay.sidebar-show .sidebar-background {
+  transform: translate(0, -50%) !important;
+}
+
+html.stream .sidebar-button {
+  width: 28px !important;
+  height: auto !important;
+  min-height: 92px;
+  padding: 14px 0 !important;
+  margin: 0 !important;
+  border-radius: 10px 0 0 10px;
+  border: 1px solid rgba(46, 46, 46, 0.9);
+  border-right: none;
+  background: rgba(0, 0, 0, 0.62) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: none !important;
+  color: #9ca3af;
+}
+
+html.stream .sidebar-button:hover {
+  background: rgba(0, 0, 0, 0.8) !important;
+  color: #fff;
+}
+
+html.stream .sidebar-button-image {
+  rotate: 0deg !important;
+  filter: invert(1) opacity(0.72);
+  width: 14px !important;
+  height: 14px !important;
+}
+
+html.stream .sidebar-show .sidebar-button-image {
+  transform: rotate(180deg) !important;
+}
+
+html.stream .sidebar-content {
+  background: color-mix(in srgb, var(--surface) 95%, transparent) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 24px 48px -16px rgba(0, 0, 0, 0.65);
+  padding: 12px !important;
+  margin: 0 10px 0 0;
+  min-width: 208px;
+  max-width: 240px;
+  color: var(--text-primary);
+}
+
+html.stream .sidebar-stream {
+  gap: 12px;
+}
+
+html.stream .sidebar-stream-buttons {
+  display: flex !important;
+  flex-direction: column;
+  gap: 2px;
+  grid-template-columns: none !important;
+}
+
+html.stream .sidebar-stream-buttons button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px !important;
+  margin: 0 !important;
+  border: none !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--text-primary) !important;
+  font-size: 13px;
+  font-weight: 450;
+  letter-spacing: 0;
+  text-shadow: none;
+}
+
+html.stream .sidebar-stream-buttons button:hover {
+  background: var(--surface-hover) !important;
+}
+
+html.stream .sidebar-stream-buttons button:last-child {
+  margin-top: 8px !important;
+  padding-top: 10px !important;
+  border-top: 1px solid var(--border) !important;
+  border-radius: 0 0 8px 8px !important;
+  color: #f87171 !important;
+}
+
+html.stream .sidebar-stream-buttons button:last-child:hover {
+  background: rgba(239, 68, 68, 0.1) !important;
+}
+
+html.stream .sidebar-content .input-div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+html.stream .sidebar-content label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  text-shadow: none;
+}
+
+html.stream .sidebar-content select,
+html.stream .sidebar-content input:not([type="range"]):not([type="checkbox"]) {
+  width: 100%;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 7px 8px;
+  text-shadow: none;
+  box-shadow: none !important;
+}
+
+html.stream .sidebar-content select:focus,
+html.stream .sidebar-content input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Stats */
+
+html.stream .video-stats {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  color: var(--text-secondary) !important;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.45;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+
+/* Modals */
+
+html.stream .modal-background {
+  background: rgba(0, 0, 0, 0.7) !important;
+  backdrop-filter: blur(4px);
+}
+
+html.stream .modal-content {
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.55);
+  color: var(--text-primary);
+  width: min(420px, 92vw) !important;
+  margin: 18vh auto !important;
+  padding: 20px !important;
+  text-shadow: none;
+}
+
+html.stream .modal-content button {
+  background: var(--surface-alt) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+  color: var(--text-primary) !important;
+  box-shadow: none !important;
+  text-shadow: none;
+  padding: 8px 12px !important;
+}
+
+html.stream .modal-content button:hover {
+  background: var(--surface-hover) !important;
+}
+
+html.stream .notification-element {
+  background: var(--surface) !important;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-primary);
+  text-shadow: none;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+}
+
+html.stream .context-menu-background {
+  background: var(--surface) !important;
+  border: 1px solid var(--border);
+  border-radius: 10px !important;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.4);
+}
+
+html.stream .context-menu-element:hover {
+  background: var(--surface-hover) !important;
+}
+
+html.stream .stream-keyboard-floating-button {
+  border-color: var(--border) !important;
+  background: rgba(20, 20, 20, 0.78) !important;
+  color: var(--text-primary) !important;
+}
