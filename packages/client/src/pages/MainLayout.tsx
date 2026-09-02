@@ -4,6 +4,7 @@ import { Sidebar } from '../components/Sidebar';
 import { TabBar } from '../components/TabBar';
 import { SessionsLayer } from '../components/SessionsLayer';
 import { PaneOverlay } from '../components/PaneOverlay';
+import { CommandPalette } from '../components/CommandPalette';
 import { SettingsPanel } from '../components/settings/SettingsPanel';
 import { useSettings } from '../hooks/useSettings';
 import { useAuth } from '../hooks/useAuth';
@@ -142,6 +143,7 @@ export function MainLayout() {
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<string | undefined>(undefined);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   const { user, refreshUser, features } = useAuth();
   const { settings } = useSettings();
@@ -222,23 +224,48 @@ export function MainLayout() {
     setSettingsOpen(true);
   }, []);
 
-  // Ctrl+` keyboard shortcut to cycle sidebar mode
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === '`') {
-        e.preventDefault();
-        cycleSidebarMode();
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [cycleSidebarMode]);
-
   // Refs for synchronous reads inside event-triggered callbacks
   const viewsRef = useRef<ViewData[]>(views);
   const activeViewIdRef = useRef<string | null>(activeViewId);
   useEffect(() => { viewsRef.current = views; }, [views]);
   useEffect(() => { activeViewIdRef.current = activeViewId; }, [activeViewId]);
+
+  // ---------- Global shortcuts ----------
+  // Capture phase + stopImmediatePropagation so these win over the window-level
+  // key capture that RDP/VNC sessions install to forward keystrokes to the host.
+
+  useEffect(() => {
+    const consume = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+
+      if (e.key === '`') {
+        consume(e);
+        cycleSidebarMode();
+      } else if (!e.altKey && (e.key === 'k' || e.key === 'K')) {
+        consume(e);
+        setPaletteOpen((open) => !open);
+      }
+    };
+
+    // Swallow the matching keyup so remote sessions don't see a release without a press
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.key === '`' || e.key === 'k' || e.key === 'K') consume(e);
+    };
+
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+    };
+  }, [cycleSidebarMode]);
 
   // Measure sessions container for pane rect computation
   useEffect(() => {
@@ -850,6 +877,12 @@ export function MainLayout() {
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         initialSection={settingsSection}
+      />
+
+      <CommandPalette
+        isOpen={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onConnect={handleSidebarConnect}
       />
     </div>
   );
