@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as R
 import { clsx } from 'clsx';
 import { useSettings } from '../hooks/useSettings';
 import { useAuth } from '../hooks/useAuth';
-import { useIsMobile } from '../hooks/useIsMobile';
+import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer';
 import { ConnectionModal, type ConnectionPrefill } from './ConnectionModal';
 import { type Protocol } from '../types/protocol.js';
 import { pointerScaleToPercent } from '../lib/vncPointerMap';
@@ -221,7 +221,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
   const { settings } = useSettings();
   const { features } = useAuth();
   const moonlightAvailable = features.moonlight;
-  const isMobile = useIsMobile();
+  const isMobile = useIsCoarsePointer();
   const healthMonitorEnabled = settings['health_monitor.enabled'] !== 'false';
   const [groups, setGroups] = useState<ConnectionGroup[]>([]);
   const [ungrouped, setUngrouped] = useState<Connection[]>([]);

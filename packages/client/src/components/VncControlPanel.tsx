@@ -8,6 +8,10 @@ interface VncControlPanelProps {
   /** The outermost session container — used for the Fullscreen API. */
   sessionRef: RefObject<HTMLDivElement | null>;
   onDisconnect: () => void;
+  touchMode: 'touchscreen' | 'touchpad';
+  onTouchModeChange: (mode: 'touchscreen' | 'touchpad') => void;
+  /** Finger-primary devices only. Desktop never mounts the touch overlays. */
+  showTouch?: boolean;
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
@@ -202,7 +206,7 @@ function ClipboardArea({ rfbRef, disabled }: { rfbRef: RefObject<RFBInstance | n
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function VncControlPanel({ rfbRef, status, sessionRef, onDisconnect }: VncControlPanelProps) {
+export function VncControlPanel({ rfbRef, status, sessionRef, onDisconnect, touchMode, onTouchModeChange, showTouch = false }: VncControlPanelProps) {
   const [open, setOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -339,6 +343,40 @@ export function VncControlPanel({ rfbRef, status, sessionRef, onDisconnect }: Vn
             <div className="border-t border-border" />
 
             <Section title="Input">
+              {showTouch && (
+              <div className="flex flex-col gap-1.5">
+                <span className="text-xs text-text-primary">Touch</span>
+                <div className="flex rounded-md border border-border overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => onTouchModeChange('touchscreen')}
+                    className={`flex-1 px-2 py-1.5 text-[11px] transition-colors ${
+                      touchMode === 'touchscreen'
+                        ? 'bg-accent text-white'
+                        : 'text-text-secondary hover:bg-surface-hover'
+                    }`}
+                  >
+                    Touchscreen
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onTouchModeChange('touchpad')}
+                    className={`flex-1 px-2 py-1.5 text-[11px] transition-colors ${
+                      touchMode === 'touchpad'
+                        ? 'bg-accent text-white'
+                        : 'text-text-secondary hover:bg-surface-hover'
+                    }`}
+                  >
+                    Touchpad
+                  </button>
+                </div>
+                <p className="text-[11px] text-text-secondary leading-tight">
+                  {touchMode === 'touchpad'
+                    ? 'Move like a laptop trackpad. Tap to click. Hold then drag, or tap then drag, to move windows. Aim with one finger, then tap a second finger for right-click (cursor stays put). Two-finger drag scrolls.'
+                    : 'Tap the picture where you want to click, like a real touchscreen.'}
+                </p>
+              </div>
+              )}
               <Toggle label="View only" checked={viewOnly} onChange={setViewOnlyMode} disabled={!connected} />
               <button
                 onClick={handleCtrlAltDel}
