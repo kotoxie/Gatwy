@@ -110,7 +110,7 @@ describe('credential rules', () => {
 
     it('is true when shared with a user or role, despite the flag being off', () => {
       addConnection('conn-targeted', ALICE);
-      execute("INSERT INTO connection_shares (id, connection_id, share_type, target_id) VALUES ('s1', 'conn-targeted', 'user', ?)", [BOB]);
+      execute("INSERT INTO resource_shares (id, resource_type, resource_id, share_type, target_id, capability) VALUES ('s1', 'connection', 'conn-targeted', 'user', ?, 'view')", [BOB]);
       assert.equal(isConnectionShared('conn-targeted', 0), true);
     });
 

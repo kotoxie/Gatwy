@@ -109,6 +109,7 @@ const EVENT_GROUPS: { label: string; events: { value: string; label: string }[] 
       { value: 'connection.shares_updated', label: 'Connection shares updated' },
       { value: 'connections.imported', label: 'Connections imported' },
       { value: 'group.shares_updated', label: 'Folder shares updated' },
+      { value: 'group.share_capability_changed', label: 'Folder share capability changed' },
     ],
   },
   {

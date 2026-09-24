@@ -21,7 +21,7 @@ function nonOwnerUsages(cred: CredentialRow): { id: string; name: string; user_i
     `SELECT c.id, c.name, c.user_id FROM connections c
      WHERE c.credential_id = ?
        AND (c.user_id != ? OR c.shared = 1
-            OR EXISTS (SELECT 1 FROM connection_shares cs WHERE cs.connection_id = c.id))
+            OR EXISTS (SELECT 1 FROM resource_shares rs WHERE rs.resource_type = 'connection' AND rs.resource_id = c.id))
      ORDER BY c.name COLLATE NOCASE`,
     [cred.id, cred.user_id],
   );

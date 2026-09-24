@@ -7,6 +7,7 @@ import { ConnectionModal, type ConnectionPrefill } from './ConnectionModal';
 import { FolderShareModal } from './FolderShareModal';
 import { type Protocol } from '../types/protocol.js';
 import { pointerScaleToPercent } from '../lib/vncPointerMap';
+import { showToast, ToastHost } from '../hooks/useToast';
 
 interface ConnectionGroup {
   id: string;
@@ -16,7 +17,21 @@ interface ConnectionGroup {
   connections: Connection[];
   /** True when this owner has directly shared this folder with a role/user. */
   isSharedOut?: boolean;
+  /** Only set on nodes under "Shared": this viewer's access level to the folder
+   * (and everything inside it — inherited down the subtree by the server). */
+  capability?: 'view' | 'edit';
+  /** Only set on nodes under "Shared": true when this exact folder carries a share of its
+   * own, whoever it's shared with — an editor may never rename/delete it even with edit
+   * capability, or an unrelated share on it could be silently destroyed. */
+  locked?: boolean;
+  /** Only set on nodes under "Shared" (never on the caller's own tree): the display name
+   * of the folder's owner, for the "Shared by <name>" context-menu item. */
+  ownerName?: string;
 }
+
+/** Effective UI capability for a folder or connection: 'owner' is the caller's own tree,
+ * 'editor'/'viewer' are the two levels a folder share can grant into someone else's tree. */
+type GroupMode = 'owner' | 'editor' | 'viewer';
 
 interface Connection {
   id: string;
@@ -46,12 +61,15 @@ interface ContextMenu {
   x: number;
   y: number;
   conn: Connection;
+  mode: GroupMode;
 }
 
 interface FolderContextMenu {
   x: number;
   y: number;
   group: ConnectionGroup;
+  mode: GroupMode;
+  locked: boolean;
 }
 
 type DeleteFolderConfirm =
@@ -65,6 +83,20 @@ function flattenGroups(groups: ConnectionGroup[], prefix = ''): FlatGroup[] {
     result.push(...flattenGroups(g.children, prefix + '\u00a0\u00a0'));
   }
   return result;
+}
+
+/** IDs of every folder in a shared-folder tree the caller has edit capability on
+ * (capability is inherited uniformly down each shared subtree by the server). */
+function collectEditableGroupIds(groups: ConnectionGroup[]): Set<string> {
+  const ids = new Set<string>();
+  function walk(list: ConnectionGroup[]) {
+    for (const g of list) {
+      if (g.capability === 'edit') ids.add(g.id);
+      walk(g.children);
+    }
+  }
+  walk(groups);
+  return ids;
 }
 
 function getAllConnectionsInGroup(group: ConnectionGroup): Connection[] {
@@ -258,6 +290,10 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
   const [inlineNewGroup, setInlineNewGroup] = useState<{ parentId: string | null; name: string } | null>(null);
   const [draggingConnId, setDraggingConnId] = useState<string | null>(null);
   const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null);
+  // Which tree the current drag started in — an editor drag must stay confined to the
+  // shared subtree it came from; dropping it in the blank "remove from folder" area
+  // is disabled rather than silently un-filing someone else's connection/folder.
+  const [draggingSourceMode, setDraggingSourceMode] = useState<GroupMode | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   // Fine-grained indicator for folder reorder drags: before/after = insert line, inside = nest
   const [dropIndicator, setDropIndicator] = useState<{ id: string; position: 'before' | 'after' | 'inside' } | null>(null);
@@ -423,20 +459,21 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
   }
 
   async function deleteConnection(id: string) {
-    await fetch(`/api/v1/connections/${id}`, {
+    const res = await fetch(`/api/v1/connections/${id}`, {
       method: 'DELETE',
       credentials: 'include',
     });
     setDeleteFolderConfirm(null);
+    if (!res.ok) {
+      const data = await res.json().catch(() => null) as { error?: string } | null;
+      showToast(data?.error || 'Could not delete this connection.', 'error');
+      return;
+    }
     fetchConnections();
   }
 
   function requestDeleteConnection(conn: Connection) {
-    if (isMobile) {
-      setDeleteFolderConfirm({ kind: 'connection', conn });
-      return;
-    }
-    void deleteConnection(conn.id);
+    setDeleteFolderConfirm({ kind: 'connection', conn });
   }
 
   function requestDeleteGroup(group: ConnectionGroup) {
@@ -456,11 +493,16 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
   }
 
   async function confirmDeleteGroup(id: string) {
-    await fetch(`/api/v1/connections/groups/${id}`, {
+    const res = await fetch(`/api/v1/connections/groups/${id}`, {
       method: 'DELETE',
       credentials: 'include',
     });
     setDeleteFolderConfirm(null);
+    if (!res.ok) {
+      const data = await res.json().catch(() => null) as { error?: string } | null;
+      showToast(data?.error || 'Could not delete this folder.', 'error');
+      return;
+    }
     fetchConnections();
   }
 
@@ -575,7 +617,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
       return null;
     }
 
-    let siblings = findConnsInGroup(groups, targetId);
+    let siblings = findConnsInGroup(allTrees, targetId);
     if (!siblings && ungrouped.some(c => c.id === targetId)) siblings = ungrouped;
     if (!siblings) return;
 
@@ -592,7 +634,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
         }
         return null;
       }
-      targetGroupId = findGroupId(groups, targetId);
+      targetGroupId = findGroupId(allTrees, targetId);
 
       await fetch(`/api/v1/connections/${draggedId}`, {
         method: 'PUT',
@@ -659,14 +701,16 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
     e.target.value = '';
   }
 
-  function handleDragStart(e: React.DragEvent, connId: string) {
+  function handleDragStart(e: React.DragEvent, connId: string, mode: GroupMode = 'owner') {
     setDraggingConnId(connId);
+    setDraggingSourceMode(mode);
     e.dataTransfer.effectAllowed = 'move';
   }
 
   function handleDragEnd() {
     setDraggingConnId(null);
     setDraggingGroupId(null);
+    setDraggingSourceMode(null);
     setDragOverId(null);
     setDropIndicator(null);
     setConnDropIndicator(null);
@@ -731,9 +775,9 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
 
   async function reorderGroup(draggedId: string, targetId: string, position: 'before' | 'after') {
     if (draggedId === targetId) return;
-    const siblings = getGroupSiblings(draggedId, groups);
-    const targetParentId = getGroupParentId(targetId, groups);
-    const draggedParentId = getGroupParentId(draggedId, groups);
+    const siblings = getGroupSiblings(draggedId, allTrees);
+    const targetParentId = getGroupParentId(targetId, allTrees);
+    const draggedParentId = getGroupParentId(draggedId, allTrees);
 
     // If they're at different levels, first reparent then reorder
     let workingSiblings = siblings;
@@ -746,7 +790,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
         body: JSON.stringify({ parentId: targetParentId ?? null }),
       });
       // Treat target's siblings as working set for ordering
-      workingSiblings = getGroupSiblings(targetId, groups);
+      workingSiblings = getGroupSiblings(targetId, allTrees);
     }
 
     // Build reordered array: remove dragged, insert at correct position relative to target
@@ -783,7 +827,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
       moveConnection(draggingConnId, groupId);
       setExpandedGroups((prev) => persistExpandedGroups(new Set([...prev, groupId])));
     } else if (draggingGroupId && draggingGroupId !== groupId) {
-      if (!isAncestorOrSelf(groupId, draggingGroupId, groups)) {
+      if (!isAncestorOrSelf(groupId, draggingGroupId, allTrees)) {
         const pos = dropIndicator?.id === groupId ? dropIndicator.position : 'inside';
         if (pos === 'inside') {
           void moveGroup(draggingGroupId, groupId);
@@ -801,30 +845,36 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
 
   function handleUngroupedDrop(e: React.DragEvent) {
     e.preventDefault();
-    if (draggingConnId) moveConnection(draggingConnId, null);
-    else if (draggingGroupId) void moveGroup(draggingGroupId, null);
+    // An editor's drag must stay confined to the shared folder it came from — dropping
+    // it here would un-file someone else's connection/folder outside anything shared to them.
+    if (draggingSourceMode !== 'editor') {
+      if (draggingConnId) moveConnection(draggingConnId, null);
+      else if (draggingGroupId) void moveGroup(draggingGroupId, null);
+    }
     setDraggingConnId(null);
     setDraggingGroupId(null);
+    setDraggingSourceMode(null);
     setDragOverId(null);
     setDropIndicator(null);
     setConnDropIndicator(null);
   }
 
-  function handleConnContextMenu(e: RMouseEvent, conn: Connection) {
+  function handleConnContextMenu(e: RMouseEvent, conn: Connection, mode: GroupMode = 'owner') {
     e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY, conn });
+    setContextMenu({ x: e.clientX, y: e.clientY, conn, mode });
   }
 
-  function renderConnection(conn: Connection) {
+  function renderConnection(conn: Connection, mode: GroupMode = 'owner') {
     const status = healthMap[conn.id];
     const indicator = connDropIndicator?.id === conn.id ? connDropIndicator.position : null;
+    const canWrite = mode !== 'viewer';
     return (
       <div
         key={conn.id}
-        draggable
-        onDragStart={(e) => handleDragStart(e, conn.id)}
-        onDragEnd={handleDragEnd}
-        onDragOver={(e) => {
+        draggable={canWrite}
+        onDragStart={canWrite ? (e) => handleDragStart(e, conn.id, mode) : undefined}
+        onDragEnd={canWrite ? handleDragEnd : undefined}
+        onDragOver={canWrite ? (e) => {
           if (!draggingConnId || draggingConnId === conn.id) return;
           e.preventDefault();
           e.stopPropagation();
@@ -834,11 +884,11 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
           const pos = y < rect.height / 2 ? 'before' : 'after';
           setConnDropIndicator({ id: conn.id, position: pos });
           setDragOverId(null);
-        }}
-        onDragLeave={() => {
+        } : undefined}
+        onDragLeave={canWrite ? () => {
           if (connDropIndicator?.id === conn.id) setConnDropIndicator(null);
-        }}
-        onDrop={(e) => {
+        } : undefined}
+        onDrop={canWrite ? (e) => {
           e.preventDefault();
           e.stopPropagation();
           if (draggingConnId && draggingConnId !== conn.id) {
@@ -847,9 +897,9 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
           }
           setDraggingConnId(null);
           setConnDropIndicator(null);
-        }}
+        } : undefined}
         onClick={() => onConnect(conn)}
-        onContextMenu={(e) => handleConnContextMenu(e, conn)}
+        onContextMenu={(e) => handleConnContextMenu(e, conn, mode)}
         className={`flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-surface-hover rounded mx-1 group/conn relative ${
           indicator ? 'z-10' : ''
         }`}
@@ -883,22 +933,24 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
             {conn.tags.length > 2 && <span className="text-[9px] text-text-secondary">+{conn.tags.length - 2}</span>}
           </span>
         )}
-        <div className={isMobile ? 'flex items-center gap-0.5 shrink-0' : 'hidden group-hover/conn:flex items-center gap-0.5 shrink-0'}>
-          <button
-            onClick={(e) => { e.stopPropagation(); setEditingConnection(conn); setShowModal(true); }}
-            title="Edit"
-            className="p-1 rounded text-text-secondary hover:text-text-primary hover:bg-surface"
-          >
-            <EditIcon />
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); requestDeleteConnection(conn); }}
-            title="Delete"
-            className="p-1 rounded text-text-secondary hover:text-red-400 hover:bg-surface"
-          >
-            <TrashIcon />
-          </button>
-        </div>
+        {canWrite && (
+          <div className={isMobile ? 'flex items-center gap-0.5 shrink-0' : 'hidden group-hover/conn:flex items-center gap-0.5 shrink-0'}>
+            <button
+              onClick={(e) => { e.stopPropagation(); setEditingConnection(conn); setShowModal(true); }}
+              title="Edit"
+              className="p-1 rounded text-text-secondary hover:text-text-primary hover:bg-surface"
+            >
+              <EditIcon />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); requestDeleteConnection(conn); }}
+              title="Delete"
+              className="p-1 rounded text-text-secondary hover:text-red-400 hover:bg-surface"
+            >
+              <TrashIcon />
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -906,6 +958,21 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
   function countConnections(group: ConnectionGroup): number {
     return group.connections.length + group.children.reduce((s, c) => s + countConnections(c), 0);
   }
+
+  // Combined forest for traversal helpers (siblings/parent/ancestor lookups) that need to
+  // work across both the caller's own tree and folders shared to them with edit capability —
+  // group IDs are unique DB primary keys, so concatenating the two forests is safe.
+  const allTrees = useMemo(() => [...groups, ...sharedGroups], [groups, sharedGroups]);
+
+  // Shared folder IDs the caller has edit capability on — used both to build the connection
+  // modal's folder picker options and to tell it when the selected folder isn't the caller's
+  // own (so it can filter out the caller's own private credentials from the picker, since
+  // the server would hard-block them anyway, since the connection belongs to the folder owner).
+  const editableSharedGroupIds = useMemo(() => collectEditableGroupIds(sharedGroups), [sharedGroups]);
+  const connectionFolderOptions = useMemo(() => {
+    const editableShared = flattenGroups(sharedGroups).filter((g) => editableSharedGroupIds.has(g.id));
+    return [...flattenGroups(groups), ...editableShared];
+  }, [groups, sharedGroups, editableSharedGroupIds]);
 
   // Search filter helpers
   const q = searchQuery.trim().toLowerCase();
@@ -980,14 +1047,22 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
     );
   }
 
-  function renderGroup(group: ConnectionGroup, depth = 0, readOnly = false) {
+  function renderGroup(group: ConnectionGroup, depth = 0, isOwnTree = true) {
+    // Mode/locked are derived from what the server already computed for this exact node
+    // (capability is inherited down the shared subtree; locked is per-node, see GroupNode).
+    const mode: GroupMode = isOwnTree ? 'owner' : (group.capability === 'edit' ? 'editor' : 'viewer');
+    const canWrite = mode !== 'viewer';
+    // Even with edit capability, the shared folder itself (or an independently-shared
+    // sub-folder inside it) can never be renamed/deleted by a collaborator — only its
+    // contents. Content actions (create, drag contents in/out, reorder) are unaffected.
+    const locked = !isOwnTree && !!group.locked;
     const expanded = isFiltering ? true : expandedGroups.has(group.id);
     const isDraggingThisGroup = draggingGroupId === group.id;
     const isInvalidDropTarget = draggingGroupId !== null &&
-      isAncestorOrSelf(group.id, draggingGroupId, groups);
-    const indicator = !readOnly && dropIndicator?.id === group.id && !isInvalidDropTarget ? dropIndicator.position : null;
+      isAncestorOrSelf(group.id, draggingGroupId, allTrees);
+    const indicator = canWrite && dropIndicator?.id === group.id && !isInvalidDropTarget ? dropIndicator.position : null;
     // Legacy connection-drag highlight
-    const isConnDropTarget = !readOnly && draggingConnId !== null && dragOverId === group.id;
+    const isConnDropTarget = canWrite && draggingConnId !== null && dragOverId === group.id;
     const totalCount = countConnections(group);
 
     return (
@@ -998,14 +1073,15 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
           <div className="absolute top-0 left-2 right-2 h-0.5 bg-accent rounded-full -translate-y-px z-20 pointer-events-none" />
         )}
         <div
-          draggable={!readOnly}
-          onDragStart={readOnly ? undefined : (e) => {
+          draggable={canWrite}
+          onDragStart={canWrite ? (e) => {
             e.stopPropagation();
             setDraggingGroupId(group.id);
             setDraggingConnId(null);
+            setDraggingSourceMode(mode);
             e.dataTransfer.effectAllowed = 'move';
-          }}
-          onDragEnd={readOnly ? undefined : handleDragEnd}
+          } : undefined}
+          onDragEnd={canWrite ? handleDragEnd : undefined}
           className={clsx(
             'flex items-center gap-1.5 px-3 py-1.5 text-sm rounded mx-1 cursor-pointer group/folder',
             indicator === 'inside' || isConnDropTarget
@@ -1013,12 +1089,14 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
               : 'hover:bg-surface-hover',
           )}
           onClick={() => toggleGroup(group.id)}
-          onContextMenu={readOnly ? undefined : (e) => {
+          onContextMenu={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            setFolderContextMenu({ x: e.clientX, y: e.clientY, group });
+            // Opened for every mode, including viewer — "Connect All" (below) is available
+            // regardless of capability; the rest of the menu gates itself on mode/locked.
+            setFolderContextMenu({ x: e.clientX, y: e.clientY, group, mode, locked });
           }}
-          onDragOver={readOnly ? undefined : (e) => {
+          onDragOver={canWrite ? (e) => {
             e.preventDefault();
             e.stopPropagation();
             if (!isInvalidDropTarget) {
@@ -1032,14 +1110,14 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
                 setDragOverId(group.id);
               }
             }
-          }}
-          onDragLeave={readOnly ? undefined : (e) => {
+          } : undefined}
+          onDragLeave={canWrite ? (e) => {
             e.stopPropagation();
             if (e.currentTarget.contains(e.relatedTarget as Node)) return;
             setDragOverId(null);
             setDropIndicator(null);
-          }}
-          onDrop={readOnly ? undefined : (e) => handleGroupDrop(e, group.id)}
+          } : undefined}
+          onDrop={canWrite ? (e) => handleGroupDrop(e, group.id) : undefined}
         >
           <svg
             width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
@@ -1047,13 +1125,13 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
           >
             <path d="M9 18l6-6-6-6" />
           </svg>
-          <FolderIcon className={!readOnly && group.isSharedOut ? 'text-accent' : undefined} />
-          {!readOnly && group.isSharedOut && (
+          <FolderIcon className={isOwnTree && group.isSharedOut ? 'text-accent' : undefined} />
+          {isOwnTree && group.isSharedOut && (
             <span title="Shared with others">
               <SharedBadge />
             </span>
           )}
-          {!readOnly && renamingGroupId === group.id ? (
+          {canWrite && !locked && renamingGroupId === group.id ? (
             <input
               autoFocus
               value={renameValue}
@@ -1070,7 +1148,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
             <span className="text-text-secondary font-medium truncate flex-1">{group.name}</span>
           )}
           <span className="text-xs text-text-secondary mr-1">{totalCount}</span>
-          {!readOnly && (
+          {canWrite && !locked && (
             <button
               onClick={(e) => { e.stopPropagation(); requestDeleteGroup(group); }}
               title="Delete folder"
@@ -1088,23 +1166,23 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
         {expanded && (
           <div
             className="ml-3 border-l border-border/40 pl-1"
-            onDragOver={readOnly ? undefined : (e) => {
+            onDragOver={canWrite ? (e) => {
               if (draggingConnId) {
                 e.preventDefault();
                 e.stopPropagation();
                 setDragOverId(group.id);
               }
-            }}
-            onDragLeave={readOnly ? undefined : (e) => {
+            } : undefined}
+            onDragLeave={canWrite ? (e) => {
               if (!e.currentTarget.contains(e.relatedTarget as Node))
                 setDragOverId(null);
-            }}
-            onDrop={readOnly ? undefined : (e) => {
+            } : undefined}
+            onDrop={canWrite ? (e) => {
               if (draggingConnId) handleGroupDrop(e, group.id);
-            }}
+            } : undefined}
           >
-            {group.connections.map(renderConnection)}
-            {group.children.map(g => renderGroup(g, depth + 1, readOnly))}
+            {group.connections.map((c) => renderConnection(c, mode))}
+            {group.children.map(g => renderGroup(g, depth + 1, isOwnTree))}
             {inlineNewGroup?.parentId === group.id && renderInlineNewFolder()}
             {group.connections.length === 0 && group.children.length === 0 && !inlineNewGroup && (
               <p className="text-xs text-text-secondary px-3 py-1 italic">Empty folder</p>
@@ -1300,7 +1378,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
         >
           {inlineNewGroup?.parentId === null && renderInlineNewFolder()}
           {filteredGroups.map(g => renderGroup(g))}
-          {filteredUngrouped.map(renderConnection)}
+          {filteredUngrouped.map((c) => renderConnection(c))}
 
           {(filteredSharedGroups.length > 0 || filteredShared.length > 0) && (
             <div className="mt-2">
@@ -1312,12 +1390,12 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
                 </svg>
                 Shared
               </div>
-              {filteredSharedGroups.map(g => renderGroup(g, 0, true))}
+              {filteredSharedGroups.map(g => renderGroup(g, 0, false))}
               {filteredShared.map((conn) => (
                 <div
                   key={conn.id}
                   onClick={() => onConnect(conn)}
-                  onContextMenu={(e) => handleConnContextMenu(e, conn)}
+                  onContextMenu={(e) => handleConnContextMenu(e, conn, 'viewer')}
                   className="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-surface-hover rounded mx-1"
                 >
                   <span
@@ -1335,7 +1413,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
             </div>
           )}
 
-          {(draggingConnId || draggingGroupId) && (
+          {(draggingConnId || draggingGroupId) && draggingSourceMode !== 'editor' && (
             <p className="text-xs text-text-secondary text-center py-2 opacity-60">
               Drop here to remove from folder
             </p>
@@ -1358,7 +1436,8 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
       {showModal && (
         <ConnectionModal
           connection={editingConnection}
-          groups={flattenGroups(groups)}
+          groups={connectionFolderOptions}
+          sharedFolderIds={editableSharedGroupIds}
           moonlightAvailable={moonlightAvailable}
           prefill={duplicatePrefill ?? (!editingConnection ? {
             name: '',
@@ -1574,7 +1653,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
             </svg>
             Duplicate Configuration
           </button>
-          {!contextMenu.conn.isShared && (
+          {contextMenu.mode !== 'viewer' && (
             <>
               <div className="border-t border-border my-1" />
               <button
@@ -1651,6 +1730,21 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
           style={{ left: folderMenuPos.x, top: folderMenuPos.y }}
           onMouseLeave={() => setShowNewConnSubmenu(false)}
         >
+          {/* Info-only, never for the owner — recipients only, so they know whose folder
+              this is. Not a button: nothing to click, it's just a label. */}
+          {folderContextMenu.mode !== 'owner' && folderContextMenu.group.ownerName && (
+            <>
+              <div className="px-3 py-1.5 text-xs text-text-secondary flex items-center gap-2">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+                  <polyline points="16 6 12 2 8 6" />
+                  <line x1="12" y1="2" x2="12" y2="15" />
+                </svg>
+                Shared by {folderContextMenu.group.ownerName}
+              </div>
+              <div className="border-t border-border my-1" />
+            </>
+          )}
           {onConnectMultiple && (
             <button
               className="w-full px-3 py-1.5 text-left hover:bg-surface-hover text-text-primary flex items-center gap-2"
@@ -1666,49 +1760,60 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
               Connect All ({getAllConnectionsInGroup(folderContextMenu.group).length})
             </button>
           )}
-          {onConnectMultiple && <div className="border-t border-border my-1" />}
-          {/* New Connection with flyout */}
-          <div
-            className="relative"
-            onMouseEnter={() => setShowNewConnSubmenu(true)}
-          >
-            <button className="w-full px-3 py-1.5 text-left hover:bg-surface-hover text-text-primary flex items-center justify-between gap-2">
-              <span className="flex items-center gap-2"><PlugIcon />New Connection</span>
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 18l6-6-6-6"/></svg>
-            </button>
-            {showNewConnSubmenu && (
+          {onConnectMultiple && folderContextMenu.mode !== 'viewer' && <div className="border-t border-border my-1" />}
+          {folderContextMenu.mode !== 'viewer' && (
+            <>
+              {/* New Connection with flyout */}
               <div
-                className={clsx(
-                  'absolute bg-surface-alt border border-border rounded shadow-lg py-1 min-w-[130px] z-50',
-                  folderSubmenuOpenLeft ? 'right-full mr-0.5' : 'left-full ml-0.5',
-                  folderSubmenuOpenUp ? 'bottom-0' : 'top-0',
-                )}
+                className="relative"
+                onMouseEnter={() => setShowNewConnSubmenu(true)}
               >
-                <ProtocolSubmenuItems moonlightAvailable={moonlightAvailable} groupId={folderContextMenu.group.id} onSelect={(p) => { openNewConnectionInFolder(folderContextMenu.group.id, p); setFolderContextMenu(null); setShowNewConnSubmenu(false); }} />
+                <button className="w-full px-3 py-1.5 text-left hover:bg-surface-hover text-text-primary flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-2"><PlugIcon />New Connection</span>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 18l6-6-6-6"/></svg>
+                </button>
+                {showNewConnSubmenu && (
+                  <div
+                    className={clsx(
+                      'absolute bg-surface-alt border border-border rounded shadow-lg py-1 min-w-[130px] z-50',
+                      folderSubmenuOpenLeft ? 'right-full mr-0.5' : 'left-full ml-0.5',
+                      folderSubmenuOpenUp ? 'bottom-0' : 'top-0',
+                    )}
+                  >
+                    <ProtocolSubmenuItems moonlightAvailable={moonlightAvailable} groupId={folderContextMenu.group.id} onSelect={(p) => { openNewConnectionInFolder(folderContextMenu.group.id, p); setFolderContextMenu(null); setShowNewConnSubmenu(false); }} />
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-          <button
-            className="w-full px-3 py-1.5 text-left hover:bg-surface-hover text-text-primary flex items-center gap-2"
-            onClick={() => { startInlineNewFolder(folderContextMenu.group.id); setFolderContextMenu(null); }}
-          >
-            <SubfolderIcon />
-            New Subfolder
-          </button>
-          <div className="border-t border-border my-1" />
-          <button
-            className="w-full px-3 py-1.5 text-left hover:bg-surface-hover text-text-primary flex items-center gap-2"
-            onClick={() => {
-              setRenamingGroupId(folderContextMenu.group.id);
-              setRenameValue(folderContextMenu.group.name);
-              setExpandedGroups((prev) => persistExpandedGroups(new Set([...prev, folderContextMenu.group.id])));
-              setFolderContextMenu(null);
-            }}
-          >
-            <PenIcon />
-            Rename
-          </button>
-          {canShareFolders && (
+              <button
+                className="w-full px-3 py-1.5 text-left hover:bg-surface-hover text-text-primary flex items-center gap-2"
+                onClick={() => { startInlineNewFolder(folderContextMenu.group.id); setFolderContextMenu(null); }}
+              >
+                <SubfolderIcon />
+                New Subfolder
+              </button>
+            </>
+          )}
+          {folderContextMenu.mode !== 'viewer' && !folderContextMenu.locked && (
+            <>
+              <div className="border-t border-border my-1" />
+              <button
+                className="w-full px-3 py-1.5 text-left hover:bg-surface-hover text-text-primary flex items-center gap-2"
+                onClick={() => {
+                  setRenamingGroupId(folderContextMenu.group.id);
+                  setRenameValue(folderContextMenu.group.name);
+                  setExpandedGroups((prev) => persistExpandedGroups(new Set([...prev, folderContextMenu.group.id])));
+                  setFolderContextMenu(null);
+                }}
+              >
+                <PenIcon />
+                Rename
+              </button>
+            </>
+          )}
+          {/* Sharing management: never offered to an editor collaborator, regardless
+              of their own connections.share permission — only the folder's owner manages
+              who it's shared with. */}
+          {folderContextMenu.mode === 'owner' && canShareFolders && (
             <button
               className="w-full px-3 py-1.5 text-left hover:bg-surface-hover text-text-primary flex items-center gap-2"
               onClick={() => { setShareFolderTarget(folderContextMenu.group); setFolderContextMenu(null); }}
@@ -1721,13 +1826,15 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
               Share Folder
             </button>
           )}
-          <button
-            className="w-full px-3 py-1.5 text-left hover:bg-surface-hover text-red-400 flex items-center gap-2"
-            onClick={() => { requestDeleteGroup(folderContextMenu.group); setFolderContextMenu(null); }}
-          >
-            <TrashIcon size={13} />
-            Delete Folder
-          </button>
+          {folderContextMenu.mode !== 'viewer' && !folderContextMenu.locked && (
+            <button
+              className="w-full px-3 py-1.5 text-left hover:bg-surface-hover text-red-400 flex items-center gap-2"
+              onClick={() => { requestDeleteGroup(folderContextMenu.group); setFolderContextMenu(null); }}
+            >
+              <TrashIcon size={13} />
+              Delete Folder
+            </button>
+          )}
         </div>
       )}
 
@@ -1739,6 +1846,8 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
           onSaved={() => { setShareFolderTarget(null); fetchConnections(); }}
         />
       )}
+
+      <ToastHost />
     </>
   );
 }

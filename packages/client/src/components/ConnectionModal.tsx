@@ -5,6 +5,7 @@ import { credentialTypesFor, fetchCredentials, type CredentialSummary } from '..
 import { CredentialPicker } from './CredentialPicker';
 import { CredentialFormModal } from './CredentialFormModal';
 import { useAuth } from '../hooks/useAuth';
+import { showToast } from '../hooks/useToast';
 
 const TagRemoveIcon = () => (
   <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
@@ -52,6 +53,10 @@ interface ConnectionModalProps {
   prefill?: ConnectionPrefill;
   /** When false, Moonlight is omitted from the protocol picker (runtime unavailable). */
   moonlightAvailable?: boolean;
+  /** IDs of shared folders the caller has edit capability on but doesn't own — a connection
+   * filed there belongs to the folder's owner, so the caller's own private credentials
+   * are hidden from the picker below (they'd be hard-blocked on save anyway). */
+  sharedFolderIds?: Set<string>;
 }
 
 interface TunnelDef { id: string; localPort: string; remoteHost: string; remotePort: string; }
@@ -206,7 +211,7 @@ const PROTOCOL_CATEGORIES: { id: ProtocolCategory; label: string; headerIcon: Re
   },
 ];
 
-export function ConnectionModal({ connection, groups, onClose, onSaved, prefill, moonlightAvailable = false }: ConnectionModalProps) {
+export function ConnectionModal({ connection, groups, onClose, onSaved, prefill, moonlightAvailable = false, sharedFolderIds }: ConnectionModalProps) {
 
   const [name, setName] = useState(prefill?.name ?? connection?.name ?? '');
   const [protocol, setProtocol] = useState<Protocol>(prefill?.protocol ?? connection?.protocol ?? 'rdp');
@@ -257,8 +262,16 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill,
   const isSharedConn = shared || selectedShareRoles.length > 0 || selectedShareUsers.length > 0;
   const allowedCredTypes = credentialTypesFor(protocol);
   const selectedCred = library.find((c) => c.id === credentialId) ?? null;
+  // A connection filed in a shared folder the caller doesn't own belongs to the folder's
+  // owner — the caller's own private credentials would always be hard-blocked on save,
+  // so they're filtered out here rather than offered as a choice that can't work.
+  const inSomeoneElsesFolder = !!groupId && !!sharedFolderIds?.has(groupId);
   // Shared connections may only reference shared credentials.
-  const pickableCreds = library.filter((c) => allowedCredTypes.includes(c.type) && (!isSharedConn || c.shared));
+  const pickableCreds = library.filter((c) =>
+    allowedCredTypes.includes(c.type) && (!isSharedConn || c.shared) && (!inSomeoneElsesFolder || c.shared));
+  const hiddenPrivateCredCount = inSomeoneElsesFolder
+    ? library.filter((c) => allowedCredTypes.includes(c.type) && !c.shared).length
+    : 0;
   const credentialProblem = credentialId && !selectedCred
     ? 'The linked credential is no longer available — pick another or enter credentials manually.'
     : selectedCred && !allowedCredTypes.includes(selectedCred.type)
@@ -483,6 +496,13 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill,
         });
       }
 
+      // Non-blocking: the owner just linked a private library credential to a connection
+      // that sits inside a folder already shared out — recipients won't actually see it.
+      const warning = resultData.warning as { connectionId: string; connectionName: string } | undefined;
+      if (warning) {
+        showToast(`"${warning.connectionName}" uses a private credential that won't be visible to this folder's recipients.`, 'error');
+      }
+
       onSaved();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Save failed');
@@ -615,6 +635,10 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill,
               ) : isSharedConn && library.some((c) => !c.shared && allowedCredTypes.includes(c.type)) ? (
                 <p className="text-[11px] text-text-secondary mt-1 leading-tight">
                   Private credentials are hidden because this connection is shared.
+                </p>
+              ) : hiddenPrivateCredCount > 0 ? (
+                <p className="text-[11px] text-text-secondary mt-1 leading-tight">
+                  Private credentials are hidden — this folder belongs to someone else, so only shared credentials can be used here.
                 </p>
               ) : null}
             </div>

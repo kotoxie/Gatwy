@@ -12,7 +12,11 @@ process.env.GATWY_ENCRYPTION_KEY = crypto.randomBytes(32).toString('hex');
 
 const { initDb, getDb, closeDb } = await import('../src/db/index.js');
 const { execute, queryAll } = await import('../src/db/helpers.js');
-const { accessibleSharedGroupIds, connectionAccessWhere, descendantGroupIds, groupOwnedBy } = await import('../src/services/permissions.js');
+const {
+  accessibleSharedGroupIds, connectionAccessWhere, descendantGroupIds, groupOwnedBy,
+  editableSharedGroupIds, canWriteSharedGroup, isSharedGroup, isSharedConnection,
+  allDescendantGroupIdsUnscoped, isInsideSharedGroup, sameSharedBranch,
+} = await import('../src/services/permissions.js');
 
 const ALICE = 'user-alice';
 const BOB = 'user-bob';
@@ -28,8 +32,22 @@ function addGroup(id: string, ownerId: string, parentId: string | null = null) {
 
 function shareGroup(groupId: string, shareType: 'user' | 'role', targetId: string) {
   execute(
-    'INSERT INTO group_shares (id, group_id, share_type, target_id) VALUES (?, ?, ?, ?)',
+    `INSERT INTO resource_shares (id, resource_type, resource_id, share_type, target_id, capability) VALUES (?, 'group', ?, ?, ?, 'view')`,
     [`share-${groupId}-${targetId}`, groupId, shareType, targetId],
+  );
+}
+
+function shareGroupEdit(groupId: string, shareType: 'user' | 'role', targetId: string) {
+  execute(
+    `INSERT INTO resource_shares (id, resource_type, resource_id, share_type, target_id, capability) VALUES (?, 'group', ?, ?, ?, 'edit')`,
+    [`share-edit-${groupId}-${targetId}`, groupId, shareType, targetId],
+  );
+}
+
+function shareConnection(connectionId: string, shareType: 'user' | 'role', targetId: string) {
+  execute(
+    `INSERT INTO resource_shares (id, resource_type, resource_id, share_type, target_id, capability) VALUES (?, 'connection', ?, ?, ?, 'view')`,
+    [`share-conn-${connectionId}-${targetId}`, connectionId, shareType, targetId],
   );
 }
 
@@ -131,6 +149,21 @@ describe('permissions', () => {
     it('is empty for a group that does not exist', () => {
       assert.deepEqual(descendantGroupIds('d-missing'), []);
     });
+
+    it('prunes the whole branch at a planted node — a grandchild re-owned by the root owner is still excluded', () => {
+      // Regression for DELETE /groups/:id (routes/connections.ts): the old inline walk used
+      // `WHERE parent_id = ? AND user_id = ?` (the constant root owner) at every level, which
+      // also stops enqueuing descendants the first time a node's owner doesn't match — so it
+      // never even looks past a planted node, regardless of who owns anything beneath it.
+      // descendantGroupIds must delete exactly the same connection set, or a real DELETE would
+      // silently leave connections orphaned with group_id pointing at a removed row.
+      addGroup('d-root3', ALICE);
+      addGroup('d-planted2', BOB, 'd-root3');
+      addGroup('d-reowned', ALICE, 'd-planted2'); // owned by ALICE again, but parented under BOB's planted node
+      assert.deepEqual(descendantGroupIds('d-root3'), ['d-root3']);
+      assert.ok(!descendantGroupIds('d-root3').includes('d-planted2'));
+      assert.ok(!descendantGroupIds('d-root3').includes('d-reowned'));
+    });
   });
 
   describe('connectionAccessWhere — folder-share inheritance and planted-connection defence', () => {
@@ -160,6 +193,142 @@ describe('permissions', () => {
 
     it('does not grant access to an unrelated user', () => {
       assert.ok(!connIdsAccessibleTo('user-erin', 'user').includes('conn-in-shared-folder'));
+    });
+  });
+
+  describe('editableSharedGroupIds / canWriteSharedGroup', () => {
+    it('is empty when a folder is shared read-only', () => {
+      addGroup('e-view-only', ALICE);
+      shareGroup('e-view-only', 'user', BOB);
+      assert.deepEqual(editableSharedGroupIds(BOB, 'user'), []);
+      assert.equal(canWriteSharedGroup('e-view-only', BOB, 'user'), false);
+    });
+
+    it('includes a folder shared with edit capability, and inherits into its descendants', () => {
+      addGroup('e-root', ALICE);
+      addGroup('e-child', ALICE, 'e-root');
+      shareGroupEdit('e-root', 'user', BOB);
+      const ids = editableSharedGroupIds(BOB, 'user').sort();
+      assert.deepEqual(ids, ['e-child', 'e-root']);
+      assert.equal(canWriteSharedGroup('e-root', BOB, 'user'), true);
+      assert.equal(canWriteSharedGroup('e-child', BOB, 'user'), true);
+    });
+
+    it('does not inherit edit capability into a child grafted under a different owner', () => {
+      addGroup('e-root2', ALICE);
+      addGroup('e-planted', BOB, 'e-root2');
+      shareGroupEdit('e-root2', 'user', CAROL);
+      assert.equal(canWriteSharedGroup('e-planted', CAROL, 'user'), false);
+    });
+
+    it('is a subset of accessibleSharedGroupIds for the same user/role', () => {
+      addGroup('e-mixed-view', ALICE);
+      addGroup('e-mixed-edit', ALICE);
+      shareGroup('e-mixed-view', 'user', 'user-dana');
+      shareGroupEdit('e-mixed-edit', 'user', 'user-dana');
+      addUser('user-dana');
+      const accessible = new Set(accessibleSharedGroupIds('user-dana', 'user'));
+      const editable = editableSharedGroupIds('user-dana', 'user');
+      assert.ok(editable.every((id) => accessible.has(id)));
+      assert.ok(accessible.has('e-mixed-view'));
+      assert.ok(!editable.includes('e-mixed-view'));
+    });
+  });
+
+  describe('isSharedGroup / isSharedConnection', () => {
+    it('is true for a group referenced by any share, regardless of who is asking', () => {
+      addGroup('s-group', ALICE);
+      shareGroup('s-group', 'user', BOB);
+      assert.equal(isSharedGroup('s-group'), true);
+    });
+
+    it('is false for a group with no shares', () => {
+      addGroup('s-group-unshared', ALICE);
+      assert.equal(isSharedGroup('s-group-unshared'), false);
+    });
+
+    it('is true for a connection referenced by its own share', () => {
+      addGroup('s-conn-group', ALICE);
+      addConnection('s-conn', ALICE, 's-conn-group');
+      shareConnection('s-conn', 'user', BOB);
+      assert.equal(isSharedConnection('s-conn'), true);
+    });
+
+    it('is false for a connection with no shares of its own, even inside a shared folder', () => {
+      addGroup('s-conn-group2', ALICE);
+      shareGroupEdit('s-conn-group2', 'user', BOB);
+      addConnection('s-conn-2', ALICE, 's-conn-group2');
+      assert.equal(isSharedConnection('s-conn-2'), false);
+    });
+  });
+
+  describe('allDescendantGroupIdsUnscoped', () => {
+    it('includes the root and every descendant, regardless of owner', () => {
+      addGroup('u-root', ALICE);
+      addGroup('u-child', ALICE, 'u-root');
+      addGroup('u-planted', BOB, 'u-child'); // grafted: parent_id points cross-owner
+      const ids = allDescendantGroupIdsUnscoped('u-root').sort();
+      assert.deepEqual(ids, ['u-child', 'u-planted', 'u-root']);
+    });
+
+    it('is empty for a group that does not exist', () => {
+      assert.deepEqual(allDescendantGroupIdsUnscoped('u-missing'), []);
+    });
+  });
+
+  describe('sameSharedBranch (editor reparenting confined to one shared branch)', () => {
+    it('is true for two sub-folders of the same directly-shared root', () => {
+      addGroup('b-root', ALICE);
+      addGroup('b-child1', ALICE, 'b-root');
+      addGroup('b-child2', ALICE, 'b-root');
+      shareGroupEdit('b-root', 'user', BOB);
+      assert.equal(sameSharedBranch('b-child1', 'b-child2', BOB, 'user'), true);
+      assert.equal(sameSharedBranch('b-root', 'b-child1', BOB, 'user'), true);
+    });
+
+    it('is false across two independent edit-shares from the same owner', () => {
+      addGroup('b-rootA', ALICE);
+      addGroup('b-rootB', ALICE);
+      shareGroupEdit('b-rootA', 'user', CAROL);
+      shareGroupEdit('b-rootB', 'user', CAROL);
+      // Both are individually writable by CAROL, but they are two separate shares —
+      // moving between them is not "the same shared folder".
+      assert.equal(canWriteSharedGroup('b-rootA', CAROL, 'user'), true);
+      assert.equal(canWriteSharedGroup('b-rootB', CAROL, 'user'), true);
+      assert.equal(sameSharedBranch('b-rootA', 'b-rootB', CAROL, 'user'), false);
+    });
+
+    it('is false when the source folder is not shared to this user at all', () => {
+      addGroup('b-unrelated', ALICE);
+      addGroup('b-shared-target', ALICE);
+      shareGroupEdit('b-shared-target', 'user', 'user-frank');
+      addUser('user-frank');
+      assert.equal(sameSharedBranch('b-unrelated', 'b-shared-target', 'user-frank', 'user'), false);
+    });
+  });
+
+  describe('isInsideSharedGroup', () => {
+    it('is false for a folder that is not shared and has no shared ancestor', () => {
+      addGroup('w-unshared', ALICE);
+      assert.equal(isInsideSharedGroup('w-unshared'), false);
+    });
+
+    it('is true for the shared folder itself', () => {
+      addGroup('w-root', ALICE);
+      shareGroup('w-root', 'user', BOB);
+      assert.equal(isInsideSharedGroup('w-root'), true);
+    });
+
+    it('is true for a descendant of a shared folder, walking up through multiple levels', () => {
+      addGroup('w-root2', ALICE);
+      addGroup('w-child', ALICE, 'w-root2');
+      addGroup('w-grandchild', ALICE, 'w-child');
+      shareGroup('w-root2', 'user', BOB);
+      assert.equal(isInsideSharedGroup('w-grandchild'), true);
+    });
+
+    it('is false for null (no folder)', () => {
+      assert.equal(isInsideSharedGroup(null), false);
     });
   });
 });

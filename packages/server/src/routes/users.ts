@@ -213,6 +213,36 @@ router.delete('/:id', (req: Request, res: Response) => {
     return;
   }
 
+  // No FK cascade on resource_shares for either role a user can play here — clean up
+  // explicitly, before the delete, same pattern as DELETE /:id and DELETE /groups/:id
+  // in routes/connections.ts. Two separate DELETEs, not one: the user can appear as the
+  // OWNER of a shared resource (resource_id belongs to them) and independently as a
+  // RECIPIENT (target_id points at them) — cleaning up one role must never touch the
+  // other. In particular `share_type = 'user'` on the recipient-side DELETE is required:
+  // target_id is just an id with no FK, so without that filter, deleting this user would
+  // also delete any role-targeted share whose role id happens to equal this user's id.
+  //
+  // Owner-side groups: scoped to groups this user owns directly. NOT expanded to
+  // descendant sub-folders — connection_groups.parent_id is declared ON DELETE CASCADE,
+  // but FK enforcement never actually runs in this app (sql.js silently drops
+  // `PRAGMA foreign_keys` on every db.export(), i.e. on every autosave — tracked
+  // separately, fixed on its own branch, out of scope here). A descendant "planted"
+  // sub-folder (owned by someone else, reparented under this user's tree) is therefore
+  // NOT removed when this user's group is deleted, so its own resource_shares row is
+  // still valid and must be left alone. See the invariant in
+  // test/userDeleteShareCleanup.test.ts ("keeps a planted sub-folder's share in sync with
+  // whether the folder itself still exists") — restore the descendant expansion here
+  // together with the FK fix, that test guards both states.
+  execute(
+    `DELETE FROM resource_shares WHERE resource_type = 'group' AND resource_id IN (SELECT id FROM connection_groups WHERE user_id = ?)`,
+    [id],
+  );
+  execute(
+    `DELETE FROM resource_shares WHERE resource_type = 'connection' AND resource_id IN (SELECT id FROM connections WHERE user_id = ?)`,
+    [id],
+  );
+  execute(`DELETE FROM resource_shares WHERE share_type = 'user' AND target_id = ?`, [id]);
+
   execute('DELETE FROM users WHERE id = ?', [id]);
 
   logAudit({

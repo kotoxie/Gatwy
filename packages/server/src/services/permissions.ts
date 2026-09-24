@@ -181,11 +181,11 @@ function ownerScopedDescendants(rootIds: string[]): string[] {
  * already-shared folder inherits access immediately — no share row needs to be copied.
  */
 export function accessibleSharedGroupIds(userId: string, role: string): string[] {
-  const directRows = queryAll<{ group_id: string }>(
-    `SELECT DISTINCT group_id FROM group_shares WHERE (share_type = 'user' AND target_id = ?) OR (share_type = 'role' AND target_id = ?)`,
+  const directRows = queryAll<{ resource_id: string }>(
+    `SELECT DISTINCT resource_id FROM resource_shares WHERE resource_type = 'group' AND ((share_type = 'user' AND target_id = ?) OR (share_type = 'role' AND target_id = ?))`,
     [userId, role],
   );
-  return ownerScopedDescendants(directRows.map((r) => r.group_id));
+  return ownerScopedDescendants(directRows.map((r) => r.resource_id));
 }
 
 /**
@@ -196,6 +196,144 @@ export function accessibleSharedGroupIds(userId: string, role: string): string[]
  */
 export function descendantGroupIds(rootId: string): string[] {
   return ownerScopedDescendants([rootId]);
+}
+
+/**
+ * Every connection_group ID reachable via a folder share to this user/role at
+ * `capability = 'edit'` — same shape as accessibleSharedGroupIds, filtered to editor
+ * shares only. Used to gate the collaborator write routes (create/modify/delete inside
+ * a shared folder); accessibleSharedGroupIds (any capability) still gates read access.
+ */
+export function editableSharedGroupIds(userId: string, role: string): string[] {
+  const directRows = queryAll<{ resource_id: string }>(
+    `SELECT DISTINCT resource_id FROM resource_shares
+     WHERE resource_type = 'group' AND capability = 'edit'
+       AND ((share_type = 'user' AND target_id = ?) OR (share_type = 'role' AND target_id = ?))`,
+    [userId, role],
+  );
+  return ownerScopedDescendants(directRows.map((r) => r.resource_id));
+}
+
+/** True when `groupId` is writable by `userId` as an editor collaborator (not owner). */
+export function canWriteSharedGroup(groupId: string, userId: string, role: string): boolean {
+  return editableSharedGroupIds(userId, role).includes(groupId);
+}
+
+/**
+ * Every directly-shared (capability='edit') group that is an ancestor-or-self of `groupId`
+ * and grants this user/role write access to it — i.e. every distinct shared-folder "branch"
+ * `groupId` is reachable through. Used to confine an editor's reparenting to sub-folders of
+ * the SAME shared folder, within one such branch — canWriteSharedGroup alone only
+ * proves a folder is writable, not that it's part of the specific branch being reorganized,
+ * so an editor holding two independent edit-shares from the same owner could otherwise use
+ * one to reach into the other.
+ */
+export function editableSharedRootsFor(groupId: string, userId: string, role: string): Set<string> {
+  const directRows = queryAll<{ resource_id: string }>(
+    `SELECT DISTINCT resource_id FROM resource_shares
+     WHERE resource_type = 'group' AND capability = 'edit'
+       AND ((share_type = 'user' AND target_id = ?) OR (share_type = 'role' AND target_id = ?))`,
+    [userId, role],
+  );
+  const roots = new Set<string>();
+  for (const row of directRows) {
+    if (ownerScopedDescendants([row.resource_id]).includes(groupId)) roots.add(row.resource_id);
+  }
+  return roots;
+}
+
+/** True when `sourceGroupId` and `targetGroupId` share at least one common editable-share
+ * branch (see editableSharedRootsFor) — the boundary that confines editor reparenting. */
+export function sameSharedBranch(sourceGroupId: string, targetGroupId: string, userId: string, role: string): boolean {
+  const sourceRoots = editableSharedRootsFor(sourceGroupId, userId, role);
+  if (sourceRoots.size === 0) return false;
+  const targetRoots = editableSharedRootsFor(targetGroupId, userId, role);
+  for (const r of targetRoots) if (sourceRoots.has(r)) return true;
+  return false;
+}
+
+/**
+ * True when `groupId` is referenced by ANY folder share, regardless of who it was shared
+ * with or who is asking — not just whichever share granted the current caller access.
+ * Editor collaborators may write inside a shared folder's contents, but must never be able
+ * to rename/delete the shared folder itself, or an independently-shared sub-folder nested
+ * inside it (that would silently destroy someone else's share when resource_shares had no
+ * FK left to cascade it automatically — see the cascade-delete cleanup in routes/connections.ts).
+ */
+export function isSharedGroup(groupId: string): boolean {
+  return !!queryOne<{ id: string }>(
+    `SELECT id FROM resource_shares WHERE resource_type = 'group' AND resource_id = ? LIMIT 1`,
+    [groupId],
+  );
+}
+
+/**
+ * Same guard as isSharedGroup, for a single connection: true when `connectionId` carries
+ * any share of its own. An editor collaborator may not delete a connection while this is
+ * true — deleting it would silently destroy that share, since resource_shares has no FK
+ * cascade to fall back on. The owner (or connections.delete_any) is never subject to this
+ * check — see the DELETE routes in routes/connections.ts.
+ */
+export function isSharedConnection(connectionId: string): boolean {
+  return !!queryOne<{ id: string }>(
+    `SELECT id FROM resource_shares WHERE resource_type = 'connection' AND resource_id = ? LIMIT 1`,
+    [connectionId],
+  );
+}
+
+/**
+ * Every connection_group ID that will actually be removed by SQLite's ON DELETE CASCADE
+ * (connection_groups.parent_id → connection_groups.id) when `rootId` is deleted — the
+ * root plus ALL descendants, regardless of owner. Unlike ownerScopedDescendants (used for
+ * permission checks, where a cross-owner "planted" child must never inherit access), a
+ * cleanup walk must not skip that child: SQLite will delete its row anyway, so any
+ * resource_shares referencing it would be left orphaned if this walk stopped early.
+ */
+export function allDescendantGroupIdsUnscoped(rootId: string): string[] {
+  const allGroups = queryAll<{ id: string; parent_id: string | null }>(
+    'SELECT id, parent_id FROM connection_groups',
+  );
+  const childrenOf = new Map<string, string[]>();
+  for (const g of allGroups) {
+    if (!g.parent_id) continue;
+    const list = childrenOf.get(g.parent_id) ?? [];
+    list.push(g.id);
+    childrenOf.set(g.parent_id, list);
+  }
+  if (!allGroups.some((g) => g.id === rootId)) return [];
+
+  const result = new Set<string>();
+  const queue = [rootId];
+  while (queue.length > 0) {
+    const gid = queue.pop()!;
+    if (result.has(gid)) continue;
+    result.add(gid);
+    for (const child of childrenOf.get(gid) ?? []) queue.push(child);
+  }
+  return [...result];
+}
+
+/**
+ * Walks UP from `groupId` through parent_id (the opposite direction of every other helper
+ * in this file, which all walk down) to tell whether `groupId` or any ancestor is itself
+ * shared as a folder. Used to extend the private-credential warning (see
+ * connectionsWithUnshareableCredential) to connection create/update, not just to saving a
+ * folder's shares: a connection filed under an already-shared folder is retroactively
+ * affected the same way a newly-shared folder's existing connections are.
+ */
+export function isInsideSharedGroup(groupId: string | null): boolean {
+  let current = groupId;
+  const visited = new Set<string>();
+  while (current) {
+    if (visited.has(current)) return false; // defensive: a cyclic parent_id chain should never exist
+    visited.add(current);
+    if (isSharedGroup(current)) return true;
+    const row = queryOne<{ parent_id: string | null }>(
+      'SELECT parent_id FROM connection_groups WHERE id = ?', [current],
+    );
+    current = row?.parent_id ?? null;
+  }
+  return false;
 }
 
 /**
@@ -215,14 +353,14 @@ export function connectionAccessWhere(alias: string, userId: string, role: strin
     ? ` OR (${alias}.group_id IN (${sharedGroups.map(() => '?').join(',')}) AND ${alias}.user_id = (SELECT cg.user_id FROM connection_groups cg WHERE cg.id = ${alias}.group_id))`
     : '';
   return {
-    where: `(${alias}.user_id = ? OR ${alias}.shared = 1 OR ${alias}.id IN (SELECT cs.connection_id FROM connection_shares cs WHERE (cs.share_type = 'user' AND cs.target_id = ?) OR (cs.share_type = 'role' AND cs.target_id = ?))${groupClause})`,
+    where: `(${alias}.user_id = ? OR ${alias}.shared = 1 OR ${alias}.id IN (SELECT rs.resource_id FROM resource_shares rs WHERE rs.resource_type = 'connection' AND ((rs.share_type = 'user' AND rs.target_id = ?) OR (rs.share_type = 'role' AND rs.target_id = ?)))${groupClause})`,
     params: [userId, userId, role, ...sharedGroups],
   };
 }
 
 /**
  * Build SQL WHERE clause + params for connection access (used by WS proxies).
- * Checks ownership, shared=1, connection_shares, and shared-folder inheritance.
+ * Checks ownership, shared=1, resource_shares, and shared-folder inheritance.
  */
 export function wsCanAccess(userId: string): { where: string; params: unknown[] } {
   const user = queryOne<{ role: string }>('SELECT role FROM users WHERE id = ?', [userId]);

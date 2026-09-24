@@ -31,12 +31,12 @@ interface CredentialSource {
 
 /**
  * Whether a connection is visible to anyone besides its owner — shared globally
- * or via connection_shares. Such connections may only use shared credentials.
+ * or via resource_shares. Such connections may only use shared credentials.
  */
 export function isConnectionShared(connectionId: string, sharedFlag: number | boolean): boolean {
   if (sharedFlag) return true;
   return !!queryOne<{ id: string }>(
-    'SELECT id FROM connection_shares WHERE connection_id = ? LIMIT 1', [connectionId],
+    `SELECT id FROM resource_shares WHERE resource_type = 'connection' AND resource_id = ? LIMIT 1`, [connectionId],
   );
 }
 

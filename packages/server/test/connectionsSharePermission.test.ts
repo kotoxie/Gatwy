@@ -214,3 +214,104 @@ describe('POST /import — connections.share required only when an imported conn
     assert.equal(res.status, 200);
   });
 });
+
+describe('DELETE — delete-blocked error names the blocking connection(s)', () => {
+  const ownerId = 'user-delete-blocked-owner';
+  const editorId = 'user-delete-blocked-editor';
+  let editorToken: string;
+  const groupIdSingle = 'g-delete-blocked-single';
+  const rootIdMulti = 'g-delete-blocked-multi-root';
+  const subIdMulti = 'g-delete-blocked-multi-sub';
+
+  before(async () => {
+    // Owner keeps the default 'no-share' role; the editor only needs connections.delete_own
+    // (the same RBAC floor DELETE /:id requires for an editor share, see routes/connections.ts).
+    execute(
+      `INSERT INTO roles (id, name, description, is_builtin, permissions_json) VALUES (?, ?, ?, 0, ?)`,
+      ['editor-delete-own', 'Editor Delete Own', 'can delete own connections, no share/edit_any', JSON.stringify([
+        'connections.delete_own',
+      ])],
+    );
+    execute(
+      `INSERT INTO users (id, username, password_hash, display_name, role) VALUES (?, ?, ?, ?, ?)`,
+      [ownerId, 'delete-blocked-owner', 'x', 'Delete Blocked Owner', 'no-share'],
+    );
+    execute(
+      `INSERT INTO users (id, username, password_hash, display_name, role) VALUES (?, ?, ?, ?, ?)`,
+      [editorId, 'delete-blocked-editor', 'x', 'Delete Blocked Editor', 'editor-delete-own'],
+    );
+    editorToken = signToken({ userId: editorId, username: 'delete-blocked-editor', role: 'editor-delete-own' });
+
+    // --- Single-connection scenario (DELETE /:id): folder shared directly to the editor,
+    // one connection inside it that is independently shared with a third party.
+    execute('INSERT INTO connection_groups (id, user_id, name, parent_id) VALUES (?, ?, ?, NULL)', [groupIdSingle, ownerId, 'single-group']);
+    execute(
+      `INSERT INTO resource_shares (id, resource_type, resource_id, share_type, target_id, capability) VALUES (?, 'group', ?, 'user', ?, 'edit')`,
+      ['share-single-group-editor', groupIdSingle, editorId],
+    );
+    execute(
+      `INSERT INTO connections (id, user_id, group_id, name, protocol, host, port) VALUES (?, ?, ?, ?, 'ssh', 'h', 22)`,
+      ['conn-delete-blocked-single', ownerId, groupIdSingle, 'Blocked Single Conn'],
+    );
+    execute(
+      `INSERT INTO resource_shares (id, resource_type, resource_id, share_type, target_id, capability) VALUES (?, 'connection', ?, 'user', ?, 'view')`,
+      ['share-conn-blocked-single', 'conn-delete-blocked-single', 'user-someone-else'],
+    );
+
+    // --- Multi-connection scenario (DELETE /groups/:id): the SHARED root is one level up
+    // from the folder actually being deleted — editableSharedGroupIds grants the sub-folder
+    // access as an owner-scoped descendant, and isSharedGroup(subIdMulti) stays false (only
+    // the root carries a resource_shares row), matching the exclusion at routes/connections.ts:1091.
+    execute('INSERT INTO connection_groups (id, user_id, name, parent_id) VALUES (?, ?, ?, NULL)', [rootIdMulti, ownerId, 'multi-root']);
+    execute(
+      `INSERT INTO resource_shares (id, resource_type, resource_id, share_type, target_id, capability) VALUES (?, 'group', ?, 'user', ?, 'edit')`,
+      ['share-multi-root-editor', rootIdMulti, editorId],
+    );
+    execute('INSERT INTO connection_groups (id, user_id, name, parent_id) VALUES (?, ?, ?, ?)', [subIdMulti, ownerId, 'multi-sub', rootIdMulti]);
+    execute(
+      `INSERT INTO connections (id, user_id, group_id, name, protocol, host, port) VALUES (?, ?, ?, ?, 'ssh', 'h', 22)`,
+      ['conn-blocked-a', ownerId, subIdMulti, 'Blocked Conn A'],
+    );
+    execute(
+      `INSERT INTO connections (id, user_id, group_id, name, protocol, host, port) VALUES (?, ?, ?, ?, 'ssh', 'h', 22)`,
+      ['conn-blocked-b', ownerId, subIdMulti, 'Blocked Conn B'],
+    );
+    // Unshared connection in the same sub-folder — proves the fix names the ACTUAL
+    // blockers (filter) rather than every connection in the folder indiscriminately.
+    execute(
+      `INSERT INTO connections (id, user_id, group_id, name, protocol, host, port) VALUES (?, ?, ?, ?, 'ssh', 'h', 22)`,
+      ['conn-unblocked-c', ownerId, subIdMulti, 'Unblocked Conn C'],
+    );
+    execute(
+      `INSERT INTO resource_shares (id, resource_type, resource_id, share_type, target_id, capability) VALUES (?, 'connection', ?, 'user', ?, 'view')`,
+      ['share-conn-blocked-a', 'conn-blocked-a', 'user-someone-else'],
+    );
+    execute(
+      `INSERT INTO resource_shares (id, resource_type, resource_id, share_type, target_id, capability) VALUES (?, 'connection', ?, 'user', ?, 'view')`,
+      ['share-conn-blocked-b', 'conn-blocked-b', 'user-someone-else'],
+    );
+  });
+
+  it('names the blocking connection on DELETE /:id, and leaves it in place', async () => {
+    const res = await authedFetch(editorToken, `${baseUrl}/conn-delete-blocked-single`, { method: 'DELETE' });
+    assert.equal(res.status, 409);
+    const body = await res.json() as { error: string };
+    assert.match(body.error, /Blocked Single Conn/);
+    // Refuse-before-any-write: the connection must still exist after the 409.
+    assert.ok(queryOne('SELECT id FROM connections WHERE id = ?', ['conn-delete-blocked-single']));
+  });
+
+  it('names every blocking connection on DELETE /groups/:id, omits the unblocked one, and leaves everything in place', async () => {
+    const res = await authedFetch(editorToken, `${baseUrl}/groups/${subIdMulti}`, { method: 'DELETE' });
+    assert.equal(res.status, 409);
+    const body = await res.json() as { error: string };
+    assert.match(body.error, /Blocked Conn A/);
+    assert.match(body.error, /Blocked Conn B/);
+    assert.doesNotMatch(body.error, /Unblocked Conn C/);
+    // Refuse-before-any-write: nothing in the sub-folder was touched.
+    assert.ok(queryOne('SELECT id FROM connection_groups WHERE id = ?', [subIdMulti]));
+    assert.ok(queryOne('SELECT id FROM connections WHERE id = ?', ['conn-blocked-a']));
+    assert.ok(queryOne('SELECT id FROM connections WHERE id = ?', ['conn-blocked-b']));
+    assert.ok(queryOne('SELECT id FROM connections WHERE id = ?', ['conn-unblocked-c']));
+  });
+});

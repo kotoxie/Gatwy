@@ -999,6 +999,44 @@ function runMigrations() {
         CREATE INDEX IF NOT EXISTS idx_group_shares_target ON group_shares(share_type, target_id);
       `,
     },
+    {
+      // Consolidates connection_shares + group_shares into a single polymorphic
+      // resource_shares table (proposed by the upstream maintainer, GitHub
+      // discussion #48) ahead of the folder-collaboration feature, which needs a
+      // shared `capability` (view/edit) concept across both resource types.
+      // Zero behaviour change here: every migrated row keeps capability='view',
+      // matching the read-only semantics both source tables had. Row `id`s are
+      // carried over as-is from their source table — they're already globally
+      // unique v4 UUIDs, so reusing them avoids needing an id generator inside
+      // a plain SQL migration (no `run:` callback required, see v18 for the
+      // established CREATE+backfill+DROP table-rebuild pattern this follows).
+      // No real FK on resource_id: SQLite can't target two different tables
+      // (connections vs connection_groups) from one column, so the cascade
+      // delete connection_shares/group_shares had is gone from here on —
+      // callers must clean up resource_shares explicitly on delete.
+      version: 23,
+      sql: `
+        CREATE TABLE IF NOT EXISTS resource_shares (
+          id TEXT PRIMARY KEY,
+          resource_type TEXT NOT NULL CHECK(resource_type IN ('connection', 'group')),
+          resource_id TEXT NOT NULL,
+          share_type TEXT NOT NULL CHECK(share_type IN ('role', 'user')),
+          target_id TEXT NOT NULL,
+          capability TEXT NOT NULL DEFAULT 'view' CHECK(capability IN ('view', 'edit')),
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_resource_shares_resource ON resource_shares(resource_type, resource_id);
+        CREATE INDEX IF NOT EXISTS idx_resource_shares_target ON resource_shares(share_type, target_id);
+
+        INSERT INTO resource_shares (id, resource_type, resource_id, share_type, target_id, capability, created_at)
+          SELECT id, 'connection', connection_id, share_type, target_id, 'view', created_at FROM connection_shares;
+        INSERT INTO resource_shares (id, resource_type, resource_id, share_type, target_id, capability, created_at)
+          SELECT id, 'group', group_id, share_type, target_id, 'view', created_at FROM group_shares;
+
+        DROP TABLE connection_shares;
+        DROP TABLE group_shares;
+      `,
+    },
   ];
 
   for (const migration of migrations) {

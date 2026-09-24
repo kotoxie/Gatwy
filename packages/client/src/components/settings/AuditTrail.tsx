@@ -35,6 +35,7 @@ function eventCategory(eventType: string): string {
   if (eventType.startsWith('auth.')) return 'auth';
   if (eventType.startsWith('session.')) return 'session';
   if (eventType.startsWith('connection.')) return 'connection';
+  if (eventType.startsWith('group.')) return 'group';
   if (eventType.startsWith('settings.')) return 'settings';
   if (eventType.startsWith('profile.')) return 'profile';
   if (eventType.startsWith('user.')) return 'user';
@@ -45,6 +46,7 @@ const CATEGORY_CLASSES: Record<string, string> = {
   auth: 'bg-blue-500/15 text-blue-400',
   session: 'bg-green-500/15 text-green-400',
   connection: 'bg-purple-500/15 text-purple-400',
+  group: 'bg-pink-500/15 text-pink-400',
   settings: 'bg-orange-500/15 text-orange-400',
   profile: 'bg-yellow-500/15 text-yellow-400',
   user: 'bg-indigo-500/15 text-indigo-400',
@@ -78,35 +80,65 @@ function DiffView({ before, after }: { before: Record<string, unknown>; after: R
   );
 }
 
-interface ShareEntry { shareType: string; targetId: string; targetName?: string }
+interface ShareEntry { shareType: string; targetId: string; targetName?: string; capability?: string }
 
-/** Renders an added/removed diff for a list of folder/connection shares (e.g.
- * group.shares_updated) instead of the generic index-keyed object diff, which
- * is unreadable for arrays (shows "0:", "1:", …). */
+/** Renders an added/removed/modified diff for a list of folder/connection shares (e.g.
+ * group.shares_updated, group.share_capability_changed) instead of the generic index-keyed
+ * object diff, which is unreadable for arrays (shows "0:", "1:", …).
+ *
+ * `capability` is optional: connection.shares_updated and older audit rows never carry it,
+ * so the label omits it rather than showing "undefined". An entry present in both before and
+ * after with a different capability lands in "Modified", not silently as a no-op — the key
+ * alone (shareType+targetId) stays the same, so it's neither added nor removed. */
 function ShareDiffView({ before, after }: { before: ShareEntry[]; after: ShareEntry[] }) {
   const key = (s: ShareEntry) => `${s.shareType}:${s.targetId}`;
-  const label = (s: ShareEntry) => `${s.shareType === 'role' ? 'Role' : 'User'}: ${s.targetName ?? s.targetId}`;
-  const beforeKeys = new Set(before.map(key));
-  const afterKeys = new Set(after.map(key));
-  const removed = before.filter((s) => !afterKeys.has(key(s)));
-  const added = after.filter((s) => !beforeKeys.has(key(s)));
+  const who = (s: ShareEntry) => `${s.shareType === 'role' ? 'Role' : 'User'}: ${s.targetName ?? s.targetId}`;
+  // Matches the wording FolderShareModal already uses for these two capabilities.
+  const capLabel = (c?: string) => (c === 'edit' ? 'Editor' : c === 'view' ? 'Viewer' : c);
+  const label = (s: ShareEntry) => (s.capability ? `${who(s)} (${capLabel(s.capability)})` : who(s));
+  const beforeByKey = new Map(before.map((s) => [key(s), s]));
+  const afterByKey = new Map(after.map((s) => [key(s), s]));
+  const removed = before.filter((s) => !afterByKey.has(key(s)));
+  const added = after.filter((s) => !beforeByKey.has(key(s)));
+  const modified = after.flatMap((s) => {
+    const b = beforeByKey.get(key(s));
+    return b && b.capability !== s.capability ? [{ entry: s, from: b.capability }] : [];
+  });
 
-  if (removed.length === 0 && added.length === 0) return <span className="text-text-secondary text-xs">No changes detected.</span>;
+  if (removed.length === 0 && added.length === 0 && modified.length === 0) {
+    return <span className="text-text-secondary text-xs">No changes detected.</span>;
+  }
+
+  // When the save was a pure capability change, removed/added are both empty and would
+  // otherwise render as two "None" boxes next to the one section that actually matters.
+  const showAddedRemoved = removed.length > 0 || added.length > 0;
 
   return (
     <div className="grid grid-cols-2 gap-2 text-xs mt-1">
-      <div className="bg-red-500/10 rounded p-2">
-        <div className="text-red-400 font-sans font-medium mb-1 not-italic">Removed</div>
-        {removed.length === 0
-          ? <span className="text-text-secondary italic">None</span>
-          : removed.map((s) => <div key={key(s)} className="text-red-300">{label(s)}</div>)}
-      </div>
-      <div className="bg-green-500/10 rounded p-2">
-        <div className="text-green-400 font-sans font-medium mb-1 not-italic">Added</div>
-        {added.length === 0
-          ? <span className="text-text-secondary italic">None</span>
-          : added.map((s) => <div key={key(s)} className="text-green-300">{label(s)}</div>)}
-      </div>
+      {showAddedRemoved && (
+        <>
+          <div className="bg-red-500/10 rounded p-2">
+            <div className="text-red-400 font-sans font-medium mb-1 not-italic">Removed</div>
+            {removed.length === 0
+              ? <span className="text-text-secondary italic">None</span>
+              : removed.map((s) => <div key={key(s)} className="text-red-300">{label(s)}</div>)}
+          </div>
+          <div className="bg-green-500/10 rounded p-2">
+            <div className="text-green-400 font-sans font-medium mb-1 not-italic">Added</div>
+            {added.length === 0
+              ? <span className="text-text-secondary italic">None</span>
+              : added.map((s) => <div key={key(s)} className="text-green-300">{label(s)}</div>)}
+          </div>
+        </>
+      )}
+      {modified.length > 0 && (
+        <div className="bg-yellow-500/10 rounded p-2 col-span-2">
+          <div className="text-yellow-400 font-sans font-medium mb-1 not-italic">Modified</div>
+          {modified.map(({ entry, from }) => (
+            <div key={key(entry)} className="text-yellow-300">{who(entry)} ({capLabel(from)} &rarr; {capLabel(entry.capability)})</div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
