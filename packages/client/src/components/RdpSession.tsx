@@ -65,6 +65,14 @@ const CODE_TO_SCANCODE: Record<string, number> = Object.fromEntries(
   Object.entries(SCANCODE_TO_CODE).map(([sc, code]) => [code, Number(sc)])
 );
 
+// Held modifiers/lock keys must not forward browser auto-repeat: IronRDP turns a
+// press of an already-pressed key into release+press, so the remote sees rapid
+// taps (Sticky Keys prompt, IME Shift toggles, repeated lock toggles).
+const NO_REPEAT_CODES = new Set([
+  'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight',
+  'MetaLeft', 'MetaRight', 'CapsLock', 'NumLock', 'ScrollLock',
+]);
+
 const RESIZE_DEBOUNCE_MS = 150;
 
 // Keys locked via Keyboard Lock API when in fullscreen.
@@ -663,6 +671,8 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
           // NumLock/CapsLock keydown still reports the pre-toggle state; the
           // matching keyup reports the new one and corrects it.
           syncLockKeys(e);
+
+          if (e.repeat && NO_REPEAT_CODES.has(e.code)) return;
 
           const pressed = e.type === 'keydown';
           if (pressed) {
