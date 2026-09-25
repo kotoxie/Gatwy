@@ -65,13 +65,18 @@ const CODE_TO_SCANCODE: Record<string, number> = Object.fromEntries(
   Object.entries(SCANCODE_TO_CODE).map(([sc, code]) => [code, Number(sc)])
 );
 
-// Held modifiers/lock keys must not forward browser auto-repeat: IronRDP turns a
-// press of an already-pressed key into release+press, so the remote sees rapid
-// taps (Sticky Keys prompt, IME Shift toggles, repeated lock toggles).
+// Held modifiers must not forward browser auto-repeat: IronRDP turns a press of
+// an already-pressed key into release+press, so the remote sees rapid taps
+// (Sticky Keys prompt, IME Shift toggles).
 const NO_REPEAT_CODES = new Set([
   'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight',
-  'MetaLeft', 'MetaRight', 'CapsLock', 'NumLock', 'ScrollLock',
+  'MetaLeft', 'MetaRight',
 ]);
+
+// Lock key state reaches the remote only through syncLockKeys. Forwarding the key
+// as well toggles it a second time whenever the browser already reports the new
+// state on keydown (Chrome on Windows), leaving the remote inverted.
+const LOCK_CODES = new Set(['CapsLock', 'NumLock', 'ScrollLock']);
 
 const RESIZE_DEBOUNCE_MS = 150;
 
@@ -668,10 +673,11 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
             (e.code === 'KeyC' || e.code === 'KeyV') && e.ctrlKey && !e.altKey && !e.metaKey;
           if (!isBrowserClipboard) e.preventDefault();
 
-          // NumLock/CapsLock keydown still reports the pre-toggle state; the
-          // matching keyup reports the new one and corrects it.
+          // Some browsers report the pre-toggle state on a lock key's keydown;
+          // the matching keyup reports the new one and corrects it.
           syncLockKeys(e);
 
+          if (LOCK_CODES.has(e.code)) return;
           if (e.repeat && NO_REPEAT_CODES.has(e.code)) return;
 
           const pressed = e.type === 'keydown';
