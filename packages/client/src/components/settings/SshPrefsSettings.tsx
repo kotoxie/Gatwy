@@ -188,7 +188,7 @@ export function SshPrefsSettings() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch('/api/v1/profile/ssh-prefs', { credentials: 'include' })
+    fetch('api/v1/profile/ssh-prefs', { credentials: 'include' })
       .then((r) => r.json())
       .then((d: SshPrefs) => {
         setFontFamilyKey(fontCssToKey(d.fontFamily ?? 'fira-code'));
@@ -205,7 +205,7 @@ export function SshPrefsSettings() {
     e.preventDefault();
     setSaving(true);
     try {
-      const res = await fetch('/api/v1/profile/ssh-prefs', {
+      const res = await fetch('api/v1/profile/ssh-prefs', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -325,12 +325,12 @@ export function SshPrefsSettings() {
               onClick={async () => {
                 setSaving(true);
                 try {
-                  await fetch('/api/v1/profile/ssh-prefs', {
+                  await fetch('api/v1/profile/ssh-prefs', {
                     method: 'DELETE',
                     credentials: 'include',
                   });
                   // Reload defaults from server
-                  const res = await fetch('/api/v1/profile/ssh-prefs', {
+                  const res = await fetch('api/v1/profile/ssh-prefs', {
                     credentials: 'include',
                   });
                   if (res.ok) {

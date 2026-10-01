@@ -243,12 +243,12 @@ function wireClientWs(
   ws.on('error', () => { const s = sessions.get(clientSessionId); if (s) s.ws = null; });
 }
 
-export function setupTelnetProxy(server: https.Server): void {
+export function setupTelnetProxy(server: https.Server, basePath = ''): void {
   const wss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (req: IncomingMessage, socket, head) => {
     const url = new URL(req.url || '', `https://${req.headers.host}`);
-    if (url.pathname === '/ws/telnet') {
+    if (url.pathname === `${basePath}/ws/telnet`) {
       wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
     }
   });

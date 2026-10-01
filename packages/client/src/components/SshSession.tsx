@@ -8,6 +8,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useSshPrefs } from '../hooks/useSshPrefs';
 import { SSH_THEMES } from '../lib/sshThemes';
 import { getWsTicket } from '../lib/wsTicket';
+import { BASE_PATH } from '../lib/basePath';
 
 interface SshSessionProps {
   tab: Tab;
@@ -64,7 +65,7 @@ export function SshSession({ tab, isActive, paneWidth, paneHeight, onStatusChang
 
   // Fetch connection config once to check promptOnConnect flag
   useEffect(() => {
-    fetch(`/api/v1/connections/${tab.connectionId}`, { credentials: 'include' })
+    fetch(`api/v1/connections/${tab.connectionId}`, { credentials: 'include' })
       .then((r) => r.json())
       .then((d: { extraConfig?: { promptOnConnect?: boolean } }) => {
         if (d.extraConfig?.promptOnConnect) {
@@ -176,7 +177,7 @@ export function SshSession({ tab, isActive, paneWidth, paneHeight, onStatusChang
       }
 
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${proto}//${window.location.host}/ws/ssh?ticket=${encodeURIComponent(ticket)}&connectionId=${encodeURIComponent(tab.connectionId)}&sessionId=${encodeURIComponent(tab.clientSessionId)}`;
+      const wsUrl = `${proto}//${window.location.host}${BASE_PATH}/ws/ssh?ticket=${encodeURIComponent(ticket)}&connectionId=${encodeURIComponent(tab.connectionId)}&sessionId=${encodeURIComponent(tab.clientSessionId)}`;
       const ws = new WebSocket(wsUrl);
       ws.binaryType = 'arraybuffer';
       wsRef.current = ws;

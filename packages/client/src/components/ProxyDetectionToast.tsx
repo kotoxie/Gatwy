@@ -16,7 +16,7 @@ export function ProxyDetectionToast() {
     try {
       const current = settings['security.trusted_proxies']?.trim() ?? '';
       const updated = current ? `${current}, ${proxyIp}` : proxyIp;
-      const res = await fetch('/api/v1/settings', {
+      const res = await fetch('api/v1/settings', {
         method: 'PUT',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },

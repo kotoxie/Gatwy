@@ -23,7 +23,7 @@ export function QueryHistory({ connectionId, onLoadQuery, onClose }: QueryHistor
 
   const fetchHistory = useCallback(() => {
     setLoading(true);
-    fetch(`/api/v1/db/${connectionId}/history?limit=200`, { credentials: 'include' })
+    fetch(`api/v1/db/${connectionId}/history?limit=200`, { credentials: 'include' })
       .then(r => r.json())
       .then(d => { if (Array.isArray(d.history)) setHistory(d.history); })
       .catch(() => {})
@@ -34,7 +34,7 @@ export function QueryHistory({ connectionId, onLoadQuery, onClose }: QueryHistor
 
   const confirmClear = () => {
     setShowConfirm(false);
-    fetch(`/api/v1/db/${connectionId}/history`, { method: 'DELETE', credentials: 'include' })
+    fetch(`api/v1/db/${connectionId}/history`, { method: 'DELETE', credentials: 'include' })
       .then(() => setHistory([]))
       .catch(() => {});
   };

@@ -390,7 +390,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
     });
 
     try {
-      const res = await fetch('/api/v1/connections/health-check', {
+      const res = await fetch('api/v1/connections/health-check', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -408,7 +408,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
 
   const fetchConnections = useCallback(async () => {
     try {
-      const res = await fetch('/api/v1/connections', {
+      const res = await fetch('api/v1/connections', {
         credentials: 'include',
       });
       if (!res.ok) return;
@@ -459,7 +459,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
   }
 
   async function deleteConnection(id: string) {
-    const res = await fetch(`/api/v1/connections/${id}`, {
+    const res = await fetch(`api/v1/connections/${id}`, {
       method: 'DELETE',
       credentials: 'include',
     });
@@ -493,7 +493,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
   }
 
   async function confirmDeleteGroup(id: string) {
-    const res = await fetch(`/api/v1/connections/groups/${id}`, {
+    const res = await fetch(`api/v1/connections/groups/${id}`, {
       method: 'DELETE',
       credentials: 'include',
     });
@@ -517,7 +517,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
 
   async function renameGroup(id: string, newName: string) {
     if (!newName.trim()) return;
-    await fetch(`/api/v1/connections/groups/${id}`, {
+    await fetch(`api/v1/connections/groups/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -538,7 +538,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
     if (!inlineNewGroup) return;
     const name = inlineNewGroup.name.trim();
     if (!name) { setInlineNewGroup(null); return; }
-    await fetch('/api/v1/connections/groups', {
+    await fetch('api/v1/connections/groups', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -564,7 +564,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
 
   async function handleDuplicate(conn: Connection) {
     try {
-      const res = await fetch(`/api/v1/connections/${conn.id}`, {
+      const res = await fetch(`api/v1/connections/${conn.id}`, {
         credentials: 'include',
       });
       if (!res.ok) return;
@@ -595,7 +595,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
 
   async function moveConnection(connId: string, targetGroupId: string | null) {
     skipHealthCheckRef.current = true;
-    await fetch(`/api/v1/connections/${connId}`, {
+    await fetch(`api/v1/connections/${connId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -636,7 +636,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
       }
       targetGroupId = findGroupId(allTrees, targetId);
 
-      await fetch(`/api/v1/connections/${draggedId}`, {
+      await fetch(`api/v1/connections/${draggedId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -651,7 +651,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
     const reordered = [...withoutDragged.slice(0, insertIdx), { id: draggedId } as Connection, ...withoutDragged.slice(insertIdx)];
 
     const items = reordered.map((c, i) => ({ id: c.id, sortOrder: i * 10 }));
-    await fetch('/api/v1/connections/reorder', {
+    await fetch('api/v1/connections/reorder', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -661,7 +661,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
   }
 
   async function handleExport() {
-    const res = await fetch('/api/v1/connections/export', { credentials: 'include' });
+    const res = await fetch('api/v1/connections/export', { credentials: 'include' });
     if (!res.ok) return;
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -678,7 +678,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
     try {
       const text = await file.text();
       const json = JSON.parse(text);
-      const res = await fetch('/api/v1/connections/import', {
+      const res = await fetch('api/v1/connections/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -739,7 +739,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
   }
 
   async function moveGroup(groupId: string, targetParentId: string | null) {
-    await fetch(`/api/v1/connections/groups/${groupId}`, {
+    await fetch(`api/v1/connections/groups/${groupId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -783,7 +783,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
     let workingSiblings = siblings;
     if (draggedParentId !== targetParentId) {
       // Reparent first (synchronously by optimistic update)
-      await fetch(`/api/v1/connections/groups/${draggedId}`, {
+      await fetch(`api/v1/connections/groups/${draggedId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -801,7 +801,7 @@ export function Sidebar({ onConnect, onConnectMultiple, width }: SidebarProps) {
     const reordered = [...withoutDragged.slice(0, insertIdx), draggedGroup, ...withoutDragged.slice(insertIdx)];
 
     const items = reordered.map((g, i) => ({ id: g.id, sortOrder: i * 10 }));
-    await fetch('/api/v1/connections/groups/reorder', {
+    await fetch('api/v1/connections/groups/reorder', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',

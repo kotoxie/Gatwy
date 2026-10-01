@@ -46,7 +46,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 async function apiFetch(path: string, options?: RequestInit) {
-  const res = await fetch(`/api/v1${path}`, {
+  const res = await fetch(`api/v1${path}`, {
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     ...options,
@@ -128,7 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Fetch the idle timeout setting from public settings so the client knows when to warn
   useEffect(() => {
     if (!token) return;
-    fetch('/api/v1/settings/public', { credentials: 'include' })
+    fetch('api/v1/settings/public', { credentials: 'include' })
       .then((r) => r.json())
       .then((d) => {
         const mins = parseInt(d?.settings?.['security.idle_timeout_minutes'] ?? '0', 10);
@@ -206,7 +206,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProxyIp(null);
     setIdleWarnSecondsLeft(null);
     // Revoke the session on the server (fire-and-forget — UI clears immediately)
-    fetch('/api/v1/auth/logout', {
+    fetch('api/v1/auth/logout', {
       method: 'POST',
       credentials: 'include',
     }).catch(() => { /* ignore network errors on logout */ });
@@ -237,7 +237,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const idleMs = Date.now() - lastActivityRef.current;
       const isIdle = idleMs > 60_000; // consider idle after 1 minute of no interaction
 
-      const url = isIdle ? '/api/v1/auth/me?heartbeat=1' : '/api/v1/auth/me';
+      const url = isIdle ? 'api/v1/auth/me?heartbeat=1' : 'api/v1/auth/me';
       try {
         await fetch(url, { credentials: 'include' });
         // 401 is handled by the global fetch interceptor below
@@ -290,7 +290,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     lastActivityRef.current = Date.now();
     setIdleWarnSecondsLeft(null);
     // Make a real request to reset last_used_at on the server
-    fetch('/api/v1/auth/me', { credentials: 'include' }).catch(() => { /* ignore */ });
+    fetch('api/v1/auth/me', { credentials: 'include' }).catch(() => { /* ignore */ });
   }, []);
 
   const setup = useCallback(async (username: string, password: string, displayName: string) => {

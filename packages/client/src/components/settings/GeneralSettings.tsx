@@ -25,7 +25,7 @@ export function GeneralSettings() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch('/api/v1/profile/general-prefs', { credentials: 'include' })
+    fetch('api/v1/profile/general-prefs', { credentials: 'include' })
       .then((r) => r.json())
       .then((d: { commandPaletteShortcut?: boolean }) => {
         setCommandPaletteShortcut(d.commandPaletteShortcut !== false);
@@ -37,7 +37,7 @@ export function GeneralSettings() {
     e.preventDefault();
     setSaving(true);
     try {
-      const res = await fetch('/api/v1/profile/general-prefs', {
+      const res = await fetch('api/v1/profile/general-prefs', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

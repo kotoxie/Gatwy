@@ -92,7 +92,7 @@ export function UsersSettings() {
     if (!editUser) return;
     setSaving(true);
     try {
-      const res = await fetch(`/api/v1/users/${editUser.id}`, {
+      const res = await fetch(`api/v1/users/${editUser.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -132,7 +132,7 @@ export function UsersSettings() {
   async function loadUsers() {
     setLoading(true);
     try {
-      const res = await fetch('/api/v1/users', { credentials: 'include' });
+      const res = await fetch('api/v1/users', { credentials: 'include' });
       if (res.ok) {
         const d = await res.json();
         setUsers(d.users);
@@ -151,14 +151,14 @@ export function UsersSettings() {
   // Load available roles for the role selector
   const [availableRoles, setAvailableRoles] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
-    fetch('/api/v1/roles', { credentials: 'include' })
+    fetch('api/v1/roles', { credentials: 'include' })
       .then(r => r.json())
       .then(d => { if (Array.isArray(d)) setAvailableRoles(d.map((r: { id: string; name: string }) => ({ id: r.id, name: r.name }))); })
       .catch(() => {});
   }, []);
 
   async function handleRoleChange(userId: string, newRole: string) {
-    const res = await fetch(`/api/v1/users/${userId}`, {
+    const res = await fetch(`api/v1/users/${userId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -174,7 +174,7 @@ export function UsersSettings() {
   }
 
   async function handleUnlock(userId: string) {
-    const res = await fetch(`/api/v1/users/${userId}/unlock`, {
+    const res = await fetch(`api/v1/users/${userId}/unlock`, {
       method: 'POST',
       credentials: 'include',
     });
@@ -192,7 +192,7 @@ export function UsersSettings() {
     setDeleting(true);
     const { id: userId } = deleteTarget;
     try {
-      const res = await fetch(`/api/v1/users/${userId}`, {
+      const res = await fetch(`api/v1/users/${userId}`, {
         method: 'DELETE',
         credentials: 'include',
       });
@@ -216,7 +216,7 @@ export function UsersSettings() {
     if (!resetPasswordValue) return;
     setResettingPassword(true);
     try {
-      const res = await fetch(`/api/v1/users/${userId}/reset-password`, {
+      const res = await fetch(`api/v1/users/${userId}/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -243,7 +243,7 @@ export function UsersSettings() {
     }
     setResettingPasskeys(true);
     try {
-      const res = await fetch(`/api/v1/users/${userId}/passkeys/reset`, {
+      const res = await fetch(`api/v1/users/${userId}/passkeys/reset`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -268,7 +268,7 @@ export function UsersSettings() {
     e.preventDefault();
     setCreating(true);
     try {
-      const res = await fetch('/api/v1/users', {
+      const res = await fetch('api/v1/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

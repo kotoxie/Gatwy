@@ -111,12 +111,12 @@ function wireClientWs(
   ws.on('error', () => { const s = getSession(clientSessionId); if (s) s.ws = null; });
 }
 
-export function setupSshProxy(server: https.Server): void {
+export function setupSshProxy(server: https.Server, basePath = ''): void {
   const wss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (req: IncomingMessage, socket, head) => {
     const url = new URL(req.url || '', `https://${req.headers.host}`);
-    if (url.pathname === '/ws/ssh') {
+    if (url.pathname === `${basePath}/ws/ssh`) {
       wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
     }
   });

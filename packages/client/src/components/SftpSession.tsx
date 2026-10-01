@@ -10,5 +10,5 @@ interface SftpSessionProps {
 
 export function SftpSession(props: SftpSessionProps) {
   const fileSessionId = useMemo(() => crypto.randomUUID(), []);
-  return <FileBrowser {...props} apiBase="/api/v1/sftp" pathSep="/" fileSessionId={fileSessionId} />;
+  return <FileBrowser {...props} apiBase="api/v1/sftp" pathSep="/" fileSessionId={fileSessionId} />;
 }

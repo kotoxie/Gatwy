@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../../hooks/useAuth.js';
 import { invalidateSettings } from '../../hooks/useSettings.js';
 import { showToast } from '../../hooks/useToast';
+import { BASE_PATH } from '../../lib/basePath';
 
 interface AuthSettings {
   'auth.local_enabled': string;
@@ -65,7 +66,7 @@ export function AuthProvidersSettings() {
 
   useEffect(() => {
     if (user?.role !== 'admin') return;
-    fetch('/api/v1/settings', { credentials: 'include' })
+    fetch('api/v1/settings', { credentials: 'include' })
       .then((r) => r.json())
       .then((d: { settings: Record<string, string> }) => {
         const merged = { ...DEFAULTS };
@@ -94,7 +95,7 @@ export function AuthProvidersSettings() {
     updates['auth.oidc_client_secret'] = oidcSecret || '__unchanged__';
 
     try {
-      const res = await fetch('/api/v1/settings', {
+      const res = await fetch('api/v1/settings', {
         method: 'PUT',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -120,7 +121,7 @@ export function AuthProvidersSettings() {
     setTestingLdap(true);
     setLdapTestResult(null);
     try {
-      const res = await fetch('/api/v1/auth/ldap/test', {
+      const res = await fetch('api/v1/auth/ldap/test', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -287,8 +288,8 @@ export function AuthProvidersSettings() {
               <Field label="Client Secret" hint="Leave blank to keep existing secret">
                 <input className="w-full px-3 py-2 bg-surface border border-border rounded text-text-primary focus:outline-none focus:ring-2 focus:ring-accent text-sm" type="password" value={oidcSecret} onChange={(e) => setOidcSecret(e.target.value)} placeholder="••••••••" autoComplete="new-password" />
               </Field>
-              <Field label="Redirect URI" hint={`Must be registered in your identity provider. Use: ${window.location.origin}/api/v1/auth/oidc/callback`}>
-                <input className="w-full px-3 py-2 bg-surface border border-border rounded text-text-primary focus:outline-none focus:ring-2 focus:ring-accent text-sm" value={settings['auth.oidc_redirect_uri']} onChange={(e) => set('auth.oidc_redirect_uri', e.target.value)} placeholder={`${window.location.origin}/api/v1/auth/oidc/callback`} />
+              <Field label="Redirect URI" hint={`Must be registered in your identity provider. Use: ${window.location.origin}${BASE_PATH}/api/v1/auth/oidc/callback`}>
+                <input className="w-full px-3 py-2 bg-surface border border-border rounded text-text-primary focus:outline-none focus:ring-2 focus:ring-accent text-sm" value={settings['auth.oidc_redirect_uri']} onChange={(e) => set('auth.oidc_redirect_uri', e.target.value)} placeholder={`${window.location.origin}${BASE_PATH}/api/v1/auth/oidc/callback`} />
               </Field>
               <Field label="Scope" hint="Space-separated OIDC scopes">
                 <input className="w-full px-3 py-2 bg-surface border border-border rounded text-text-primary focus:outline-none focus:ring-2 focus:ring-accent text-sm" value={settings['auth.oidc_scope']} onChange={(e) => set('auth.oidc_scope', e.target.value)} placeholder="openid email profile" />

@@ -75,7 +75,7 @@ export function CredentialsSettings() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/v1/credentials/${deleteTarget.id}`, { method: 'DELETE', credentials: 'include' });
+      const res = await fetch(`api/v1/credentials/${deleteTarget.id}`, { method: 'DELETE', credentials: 'include' });
       const data = await res.json().catch(() => ({}));
       if (res.status === 409) { readInUse(data, deleteTarget.name); setDeleteTarget(null); return; }
       if (!res.ok) throw new Error(data.error || `Server error (${res.status})`);

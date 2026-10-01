@@ -30,7 +30,7 @@ export function useSettings() {
     try {
       // Users with settings.manage get full settings; all others use the public endpoint
       const hasSettingsPerm = user?.permissions?.includes('settings.manage');
-      const endpoint = hasSettingsPerm ? '/api/v1/settings' : '/api/v1/settings/public';
+      const endpoint = hasSettingsPerm ? 'api/v1/settings' : 'api/v1/settings/public';
       const res = await fetch(endpoint, { credentials: 'include' });
       if (res.ok) {
         const d = await res.json();

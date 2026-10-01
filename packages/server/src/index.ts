@@ -38,6 +38,7 @@ import databaseRoutes from './routes/database.js';
 import moonlightRoutes from './routes/moonlight.js';
 import { ipRulesMiddleware, guardUpgradesByIpRules } from './middleware/ipRules.js';
 import { isTrustedProxyAddress } from './services/ip.js';
+import { renderIndexHtml } from './services/indexHtml.js';
 
 async function main() {
   // Ensure data directories
@@ -67,6 +68,9 @@ async function main() {
 
   const { cert, key } = ensureTlsCerts();
 
+  // Reverse-proxy path prefix (e.g. '/sys/ftp'), '' at root. See config.ts#normalizeBasePath.
+  const bp = config.basePath;
+
   // Express app
   const app = express();
 
@@ -87,18 +91,18 @@ async function main() {
       },
     },
   }));
-  app.use('/api/v1/smb/:connectionId/upload', express.raw({ limit: '100mb', type: '*/*' }));
-  app.use('/api/v1/sftp/:connectionId/upload', express.raw({ limit: '100mb', type: '*/*' }));
-  app.use('/api/v1/ftp/:connectionId/upload', express.raw({ limit: '100mb', type: '*/*' }));
-  app.use('/api/v1/sessions/:id/recording/chunk', express.raw({ limit: '100mb', type: '*/*' }));
-  app.use('/api/v1/backup/import', express.raw({ limit: '4gb', type: 'application/octet-stream' }));
+  app.use(`${bp}/api/v1/smb/:connectionId/upload`, express.raw({ limit: '100mb', type: '*/*' }));
+  app.use(`${bp}/api/v1/sftp/:connectionId/upload`, express.raw({ limit: '100mb', type: '*/*' }));
+  app.use(`${bp}/api/v1/ftp/:connectionId/upload`, express.raw({ limit: '100mb', type: '*/*' }));
+  app.use(`${bp}/api/v1/sessions/:id/recording/chunk`, express.raw({ limit: '100mb', type: '*/*' }));
+  app.use(`${bp}/api/v1/backup/import`, express.raw({ limit: '4gb', type: 'application/octet-stream' }));
   app.use(express.json({ limit: '6mb' })); // allow base64-encoded logos (~4 MB image → ~5.4 MB base64)
   app.use(cookieParser());
 
   // CSRF protection: for state-changing API requests that carry a session cookie,
   // validate the Origin or Referer header matches the server host.
   // This satisfies the double-submit / origin-check CSRF mitigation pattern.
-  app.use('/api/v1', (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  app.use(`${bp}/api/v1`, (req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
       return next();
     }
@@ -121,27 +125,27 @@ async function main() {
   });
 
   // API routes
-  app.use('/api/v1', ipRulesMiddleware);
-  app.use('/api/v1/auth', authRoutes);
-  app.use('/api/v1/connections', connectionRoutes);
-  app.use('/api/v1/credentials', credentialRoutes);
-  app.use('/api/v1/settings', settingsRoutes);
-  app.use('/api/v1/profile/login-sessions', loginSessionsRoutes);
-  app.use('/api/v1/profile', profileRoutes);
-  app.use('/api/v1/users', usersRoutes);
-  app.use('/api/v1/audit', auditRoutes);
-  app.use('/api/v1/version', versionRoutes);
-  app.use('/api/v1/sessions', sessionsRoutes);
-  app.use('/api/v1/backup', backupRoutes);
-  app.use('/api/v1/smb', smbRoutes);
-  app.use('/api/v1/sftp', sftpRoutes);
-  app.use('/api/v1/ftp', ftpRoutes);
-  app.use('/api/v1/file-sessions', fileSessionsRoutes);
-  app.use('/api/v1/roles', rolesRoutes);
-  app.use('/api/v1/notifications', notificationsRoutes);
-  app.use('/api/v1/db', databaseRoutes);
-  app.use('/api/v1/moonlight', moonlightRoutes);
-  app.use('/health', healthRoutes);
+  app.use(`${bp}/api/v1`, ipRulesMiddleware);
+  app.use(`${bp}/api/v1/auth`, authRoutes);
+  app.use(`${bp}/api/v1/connections`, connectionRoutes);
+  app.use(`${bp}/api/v1/credentials`, credentialRoutes);
+  app.use(`${bp}/api/v1/settings`, settingsRoutes);
+  app.use(`${bp}/api/v1/profile/login-sessions`, loginSessionsRoutes);
+  app.use(`${bp}/api/v1/profile`, profileRoutes);
+  app.use(`${bp}/api/v1/users`, usersRoutes);
+  app.use(`${bp}/api/v1/audit`, auditRoutes);
+  app.use(`${bp}/api/v1/version`, versionRoutes);
+  app.use(`${bp}/api/v1/sessions`, sessionsRoutes);
+  app.use(`${bp}/api/v1/backup`, backupRoutes);
+  app.use(`${bp}/api/v1/smb`, smbRoutes);
+  app.use(`${bp}/api/v1/sftp`, sftpRoutes);
+  app.use(`${bp}/api/v1/ftp`, ftpRoutes);
+  app.use(`${bp}/api/v1/file-sessions`, fileSessionsRoutes);
+  app.use(`${bp}/api/v1/roles`, rolesRoutes);
+  app.use(`${bp}/api/v1/notifications`, notificationsRoutes);
+  app.use(`${bp}/api/v1/db`, databaseRoutes);
+  app.use(`${bp}/api/v1/moonlight`, moonlightRoutes);
+  app.use(`${bp}/health`, healthRoutes);
 
   // Global JSON error handler — prevents Express from returning HTML 500 pages
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -159,30 +163,31 @@ async function main() {
   // /api/v1 is the only Express mount covered by ipRulesMiddleware. Must come before the
   // proxies below register their own 'upgrade' listeners.
   guardUpgradesByIpRules(server);
-  app.use('/mlw', ipRulesMiddleware);
+  app.use(`${bp}/mlw`, ipRulesMiddleware);
 
   // /mlw HTTP + WS: JWT cookie + protocols.moonlight (same authorizeMoonlightAccess)
   // Must be registered before the SPA catch-all.
-  setupMoonlightProxy(server, app);
+  setupMoonlightProxy(server, app, bp);
 
   // Serve frontend static files
   const clientDir = config.clientDir;
   if (fs.existsSync(clientDir)) {
-    app.use(express.static(clientDir));
-    app.get('/{*splat}', (_req, res) => {
-      res.sendFile(path.join(clientDir, 'index.html'));
+    app.use(bp || '/', express.static(clientDir, { index: false }));
+    const indexHtml = renderIndexHtml(clientDir, bp);
+    app.get(`${bp}/{*splat}`, (_req, res) => {
+      res.type('html').send(indexHtml);
     });
   } else {
-    app.get('/', (_req, res) => {
+    app.get(bp || '/', (_req, res) => {
       res.json({ message: 'Gatwy API is running. Frontend not built yet.' });
     });
   }
 
   // WebSocket proxies
-  setupRdpProxy(server);
-  setupSshProxy(server);
-  setupVncProxy(server);
-  setupTelnetProxy(server);
+  setupRdpProxy(server, bp);
+  setupSshProxy(server, bp);
+  setupVncProxy(server, bp);
+  setupTelnetProxy(server, bp);
 
   // Graceful shutdown
   function shutdown() {

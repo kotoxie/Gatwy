@@ -50,7 +50,7 @@ export function RecordingSettings() {
   }, [settings]);
 
   useEffect(() => {
-    fetch('/api/v1/sessions/storage', { credentials: 'include' })
+    fetch('api/v1/sessions/storage', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { bytes: number } | null) => {
         if (d) setStorageBytes(d.bytes);
@@ -59,7 +59,7 @@ export function RecordingSettings() {
   }, []);
 
   async function saveSettings(updates: Record<string, string>): Promise<{ ok: boolean; error?: string }> {
-    const res = await fetch('/api/v1/settings', {
+    const res = await fetch('api/v1/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -96,7 +96,7 @@ export function RecordingSettings() {
   async function handlePurge() {
     setPurging(true);
     try {
-      const res = await fetch('/api/v1/sessions', {
+      const res = await fetch('api/v1/sessions', {
         method: 'DELETE',
         credentials: 'include',
       });

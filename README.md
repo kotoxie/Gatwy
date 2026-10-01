@@ -93,6 +93,7 @@ Open **`https://<YOUR_IP>:7443`** — on first launch you'll be prompted to crea
 | `PORT` | `7443` | HTTPS port |
 | `TLS_CERT_PATH` / `TLS_KEY_PATH` | *(auto)* | Custom TLS certificate & key paths |
 | `DATA_DIR` | `/app/data` | Database, certs, recordings, and logs |
+| `BASE_PATH` | unset (root) | Path prefix to serve Gatwy under when running behind a reverse proxy that routes a sub-path (e.g. `/sys/ftp` for Traefik's `PathPrefix('/sys/ftp')`). Leave unset for root deployments. |
 | `OIDC_TOKEN_AUTH_METHOD` | `client_secret_basic` | OIDC token endpoint client auth. Use `client_secret_basic` (or `basic`) or `client_secret_post` (or `post`). |
 | `ENABLE_MOONLIGHT` | unset | Opt in to Moonlight / Sunshine. Set to `1`, `true`, or `yes` to download a pinned moonlight-web-stream release at start. Default image stays MIT-clean. |
 

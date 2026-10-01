@@ -10,5 +10,5 @@ interface FtpSessionProps {
 
 export function FtpSession(props: FtpSessionProps) {
   const fileSessionId = useMemo(() => crypto.randomUUID(), []);
-  return <FileBrowser {...props} apiBase="/api/v1/ftp" pathSep="/" fileSessionId={fileSessionId} />;
+  return <FileBrowser {...props} apiBase="api/v1/ftp" pathSep="/" fileSessionId={fileSessionId} />;
 }

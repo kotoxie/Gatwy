@@ -57,7 +57,7 @@ function formatSize(bytes: number): string {
 }
 
 function logFileTransfer(connectionId: string, fileName: string, fileSize: number, direction: 'upload' | 'download') {
-  fetch('/api/v1/sessions/rdp-file-transfer', {
+  fetch('api/v1/sessions/rdp-file-transfer', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ connectionId, fileName, fileSize, direction }),

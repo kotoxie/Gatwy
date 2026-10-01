@@ -6,6 +6,7 @@ import { DisconnectOverlay } from './DisconnectOverlay';
 import { RdpMobileKeyboard } from './RdpMobileKeyboard';
 import { RdpClipboardService } from '../services/rdpClipboard';
 import { RdpFileTransfer, RdpFileTransferHandle } from './RdpFileTransfer';
+import { BASE_PATH } from '../lib/basePath';
 
 let rdpInitialized = false;
 let Backend: Record<string, unknown> | null = null;
@@ -172,7 +173,7 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         if (cancelled) return;
 
         setStatus('Fetching connection info...');
-        const sessionRes = await fetch(`/api/v1/connections/${tab.connectionId}/session`, {
+        const sessionRes = await fetch(`api/v1/connections/${tab.connectionId}/session`, {
           credentials: 'include',
         });
         if (!sessionRes.ok) throw new Error('Failed to fetch connection credentials');
@@ -235,7 +236,7 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         if (cancelled) return;
 
         const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${proto}//${window.location.host}/ws/rdp-raw?ticket=${encodeURIComponent(ticket)}&connectionId=${encodeURIComponent(tab.connectionId)}`;
+        const wsUrl = `${proto}//${window.location.host}${BASE_PATH}/ws/rdp-raw?ticket=${encodeURIComponent(ticket)}&connectionId=${encodeURIComponent(tab.connectionId)}`;
 
         setStatus('Connecting...');
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -391,7 +392,7 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         // We composite the WebGL frame + decoded cursor image onto a 2D canvas
         // each rAF tick and capture that compositor instead.
         try {
-          const recRes = await fetch('/api/v1/sessions/rdp-session', {
+          const recRes = await fetch('api/v1/sessions/rdp-session', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
@@ -460,7 +461,7 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
               mr.ondataavailable = (e) => {
                 if (e.data.size > 0 && rdpSessionIdRef.current) {
                   lastChunkFetch = e.data.arrayBuffer().then((buf) => {
-                    return fetch(`/api/v1/sessions/${rdpSessionIdRef.current}/recording/chunk`, {
+                    return fetch(`api/v1/sessions/${rdpSessionIdRef.current}/recording/chunk`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/octet-stream' },
                       credentials: 'include',
@@ -475,7 +476,7 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
               (mr as any)._finalizeOnStop = (sessionId: string) => {
                 mr.onstop = () => {
                   lastChunkFetch.finally(() => {
-                    fetch(`/api/v1/sessions/${sessionId}/recording/finalize`, {
+                    fetch(`api/v1/sessions/${sessionId}/recording/finalize`, {
                       method: 'POST',
                       credentials: 'include',
                     }).catch(() => {});
@@ -496,7 +497,7 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
                 if (eventBuffer.length === 0 || !rdpSessionIdRef.current) return;
                 const batch = eventBuffer;
                 eventBuffer = [];
-                fetch(`/api/v1/sessions/${rdpSessionIdRef.current}/recording/events`, {
+                fetch(`api/v1/sessions/${rdpSessionIdRef.current}/recording/events`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   credentials: 'include',
@@ -846,7 +847,7 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         mr.stop();
       } else if (capturedSessionId) {
         // Recorder never started (recording disabled) — still mark session ended
-        fetch(`/api/v1/sessions/${capturedSessionId}/recording/finalize`, {
+        fetch(`api/v1/sessions/${capturedSessionId}/recording/finalize`, {
           method: 'POST',
           credentials: 'include',
         }).catch(() => {});
