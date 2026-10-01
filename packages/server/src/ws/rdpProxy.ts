@@ -33,13 +33,13 @@ interface ConnectionRow {
 const RDP_TRACE_ENABLED = process.env.GATWY_RDP_TRACE === '1' || process.env.GATWY_RDP_TRACE === 'true';
 const RDP_TRACE_MAX_EVENTS = Number.parseInt(process.env.GATWY_RDP_TRACE_MAX_EVENTS ?? '300', 10);
 
-export function setupRdpProxy(server: https.Server): void {
+export function setupRdpProxy(server: https.Server, basePath = ''): void {
   const wssRaw = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (req: IncomingMessage, socket, head) => {
     const url = new URL(req.url || '', `https://${req.headers.host}`);
 
-    if (url.pathname === '/ws/rdp-raw') {
+    if (url.pathname === `${basePath}/ws/rdp-raw`) {
       wssRaw.handleUpgrade(req, socket, head, (ws) => {
         wssRaw.emit('connection', ws, req);
       });

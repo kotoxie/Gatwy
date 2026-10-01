@@ -11,16 +11,17 @@ import { logAudit } from '../services/audit.js';
 import { resolveClientIp } from '../services/ip.js';
 import { v4 as uuid } from 'uuid';
 
-export function setupVncProxy(server: Server): void {
+export function setupVncProxy(server: Server, basePath = ''): void {
   const wss = new WebSocketServer({ noServer: true });
+  const mountPrefix = `${basePath}/ws/vnc/`;
 
   server.on('upgrade', (req, socket, head) => {
     const url = req.url ?? '';
-    if (!url.startsWith('/ws/vnc/')) return;
+    if (!url.startsWith(mountPrefix)) return;
 
-    // URL format: /ws/vnc/{connectionId}?ticket={ws-ticket}
+    // URL format: {basePath}/ws/vnc/{connectionId}?ticket={ws-ticket}
     const [pathname, qs] = url.split('?');
-    const connectionId = pathname.slice('/ws/vnc/'.length);
+    const connectionId = pathname.slice(mountPrefix.length);
     const ticketId = new URLSearchParams(qs).get('ticket');
 
     if (!ticketId) { socket.destroy(); return; }

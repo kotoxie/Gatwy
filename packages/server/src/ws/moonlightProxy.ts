@@ -29,9 +29,9 @@ export const MLW_FRAME_CSP = [
   "frame-ancestors 'self'",
 ].join('; ');
 
-function shouldProxy(url: string | undefined): boolean {
+function shouldProxy(url: string | undefined, prefix: string): boolean {
   if (!url) return false;
-  return url === PREFIX || url.startsWith(`${PREFIX}/`) || url.startsWith(`${PREFIX}?`);
+  return url === prefix || url.startsWith(`${prefix}/`) || url.startsWith(`${prefix}?`);
 }
 
 function unavailableBody() {
@@ -50,10 +50,11 @@ function writeUpgradeError(socket: Duplex, status: number, reason: string): void
  * HTTP GET/HEAD/POST /mlw/* and the WS upgrade use the same authorizeMoonlightAccess()
  * check: JWT cookie (or Bearer) + login session + protocols.moonlight + runtime.
  */
-export function setupMoonlightProxy(server: Server, app: import('express').Express): void {
+export function setupMoonlightProxy(server: Server, app: import('express').Express, basePath = ''): void {
   const header = moonlightProxyHeader();
+  const mountPrefix = `${basePath}${PREFIX}`;
 
-  app.use(PREFIX, async (req, res) => {
+  app.use(mountPrefix, async (req, res) => {
     const auth = authorizeMoonlightAccess(req);
     if (!auth.ok) {
       if (auth.status === 503) {
@@ -80,9 +81,15 @@ export function setupMoonlightProxy(server: Server, app: import('express').Expre
     }
 
     const upstream = moonlightUpstream();
-    const targetPath = req.originalUrl.startsWith(PREFIX)
-      ? req.originalUrl
-      : `${PREFIX}${req.url}`;
+    const effectiveUrl = basePath && req.originalUrl.startsWith(basePath)
+      ? req.originalUrl.slice(basePath.length)
+      : req.originalUrl;
+    const effectiveReqUrl = basePath && req.url.startsWith(basePath)
+      ? req.url.slice(basePath.length)
+      : req.url;
+    const targetPath = effectiveUrl.startsWith(PREFIX)
+      ? effectiveUrl
+      : `${PREFIX}${effectiveReqUrl}`;
 
     const headers: http.OutgoingHttpHeaders = { ...req.headers, host: `${upstream.host}:${upstream.port}` };
     headers[header.name] = header.value;
@@ -143,7 +150,7 @@ export function setupMoonlightProxy(server: Server, app: import('express').Expre
 
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const url = req.url ?? '';
-    if (!shouldProxy(url)) return;
+    if (!shouldProxy(url, mountPrefix)) return;
 
     const auth = authorizeMoonlightAccess(req);
     if (!auth.ok) {
@@ -173,10 +180,11 @@ export function setupMoonlightProxy(server: Server, app: import('express').Expre
       delete headers['authorization'];
       delete headers['cookie'];
 
+      const upstreamPath = basePath && url.startsWith(basePath) ? url.slice(basePath.length) : url;
       const proxyReq = http.request({
         host: upstream.host,
         port: upstream.port,
-        path: url,
+        path: upstreamPath,
         method: 'GET',
         headers,
       });
