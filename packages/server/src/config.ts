@@ -27,7 +27,6 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET || '',
   sessionTimeout: process.env.SESSION_TIMEOUT || '90d',
   // Reverse-proxy path prefix Gatwy is served under, e.g. '/sys/ftp'. Defaults to '/' (root),
-  // which is fully backward compatible with every existing deployment.
   basePath: normalizeBasePath(process.env.BASE_PATH),
 
   get dbPath() {
