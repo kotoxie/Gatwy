@@ -83,7 +83,7 @@ interface FileBrowserProps {
   connectionName: string;
   isActive: boolean;
   onStatusChange?: (status: 'connecting' | 'connected' | 'disconnected') => void;
-  /** API path prefix, e.g. 'api/v1/sftp' */
+  /** API path prefix, e.g. '/api/v1/sftp' */
   apiBase: string;
   /** Path separator: '/' for SFTP/FTP, '\\' for SMB */
   pathSep?: string;

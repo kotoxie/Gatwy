@@ -66,7 +66,7 @@ export function AuthProvidersSettings() {
 
   useEffect(() => {
     if (user?.role !== 'admin') return;
-    fetch('api/v1/settings', { credentials: 'include' })
+    fetch('/api/v1/settings', { credentials: 'include' })
       .then((r) => r.json())
       .then((d: { settings: Record<string, string> }) => {
         const merged = { ...DEFAULTS };
@@ -95,7 +95,7 @@ export function AuthProvidersSettings() {
     updates['auth.oidc_client_secret'] = oidcSecret || '__unchanged__';
 
     try {
-      const res = await fetch('api/v1/settings', {
+      const res = await fetch('/api/v1/settings', {
         method: 'PUT',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -121,7 +121,7 @@ export function AuthProvidersSettings() {
     setTestingLdap(true);
     setLdapTestResult(null);
     try {
-      const res = await fetch('api/v1/auth/ldap/test', {
+      const res = await fetch('/api/v1/auth/ldap/test', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },

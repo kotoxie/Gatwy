@@ -25,7 +25,7 @@ export function credentialTypesFor(protocol: string): CredentialType[] {
 }
 
 export async function fetchCredentials(): Promise<CredentialSummary[]> {
-  const res = await fetch('api/v1/credentials', { credentials: 'include' });
+  const res = await fetch('/api/v1/credentials', { credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to load credentials (${res.status})`);
   return res.json() as Promise<CredentialSummary[]>;
 }

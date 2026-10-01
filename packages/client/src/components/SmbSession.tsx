@@ -10,5 +10,5 @@ interface SmbSessionProps {
 
 export function SmbSession(props: SmbSessionProps) {
   const fileSessionId = useMemo(() => crypto.randomUUID(), []);
-  return <FileBrowser {...props} apiBase="api/v1/smb" pathSep="\\" fileSessionId={fileSessionId} />;
+  return <FileBrowser {...props} apiBase="/api/v1/smb" pathSep="\\" fileSessionId={fileSessionId} />;
 }

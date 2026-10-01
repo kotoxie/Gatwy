@@ -401,7 +401,7 @@ router.post('/:id/session', async (req: Request, res: Response) => {
       hostId,
       appId: app.app_id,
       appTitle: app.title,
-      streamPath: `${config.basePath}/mlw/stream.html?hostId=${hostId}&appId=${app.app_id}`,
+      streamPath: `${config.basePathPrefix}/mlw/stream.html?hostId=${hostId}&appId=${app.app_id}`,
       bitrateKbps,
       fps,
       resolution,

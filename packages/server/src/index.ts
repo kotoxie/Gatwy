@@ -68,8 +68,8 @@ async function main() {
 
   const { cert, key } = ensureTlsCerts();
 
-  // Reverse-proxy path prefix (e.g. '/sys/ftp'), '' at root. See config.ts#normalizeBasePath.
-  const bp = config.basePath;
+  // Reverse-proxy path prefix (e.g. '/sys/ftp'), '' at root. See config.ts#basePathPrefix.
+  const bp = config.basePathPrefix;
 
   // Express app
   const app = express();

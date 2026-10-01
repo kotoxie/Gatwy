@@ -26,7 +26,7 @@ export function useGeneralPrefs(): GeneralPrefs & { loading: boolean } {
   useEffect(() => {
     if (!token) return;
     const load = () => {
-      fetch('api/v1/profile/general-prefs', { credentials: 'include' })
+      fetch('/api/v1/profile/general-prefs', { credentials: 'include' })
         .then((r) => (r.ok ? r.json() : null))
         .then((data: Record<string, unknown> | null) => {
           if (!data) return;

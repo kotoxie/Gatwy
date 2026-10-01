@@ -68,7 +68,7 @@ export function DbSession({ connectionId, connectionName, isActive, onStatusChan
     setSessionId(null);
     onStatusChange?.('connecting');
 
-    fetch(`api/v1/db/${connectionId}/connect`, { method: 'POST', credentials: 'include' })
+    fetch(`/api/v1/db/${connectionId}/connect`, { method: 'POST', credentials: 'include' })
       .then(r => r.json())
       .then((d: { sessionId?: string; protocol?: string; defaultDatabase?: string; rowLimit?: number; error?: string }) => {
         if (cancelled) return;
@@ -89,7 +89,7 @@ export function DbSession({ connectionId, connectionName, isActive, onStatusChan
 
     return () => {
       cancelled = true;
-      fetch(`api/v1/db/${connectionId}/disconnect`, { method: 'POST', credentials: 'include' }).catch(() => {});
+      fetch(`/api/v1/db/${connectionId}/disconnect`, { method: 'POST', credentials: 'include' }).catch(() => {});
       onStatusChange?.('disconnected');
     };
   }, [connectionId, reconnectCount]);
@@ -99,7 +99,7 @@ export function DbSession({ connectionId, connectionName, isActive, onStatusChan
     setIsLoading(true);
     setResult(null);
     try {
-      const r = await fetch(`api/v1/db/${connectionId}/query`, {
+      const r = await fetch(`/api/v1/db/${connectionId}/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -145,7 +145,7 @@ export function DbSession({ connectionId, connectionName, isActive, onStatusChan
 
   const handleExport = useCallback(async (sql: string, format: 'csv' | 'json') => {
     try {
-      const r = await fetch(`api/v1/db/${connectionId}/export`, {
+      const r = await fetch(`/api/v1/db/${connectionId}/export`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

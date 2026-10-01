@@ -280,7 +280,7 @@ export function AuditTrail() {
   const loadEntries = useCallback(async (overridePage?: number) => {
     setLoading(true);
     try {
-      const res = await fetch(`api/v1/audit?${buildParams(overridePage)}`, {
+      const res = await fetch(`/api/v1/audit?${buildParams(overridePage)}`, {
         credentials: 'include',
       });
       if (res.ok) {
@@ -296,13 +296,13 @@ export function AuditTrail() {
   useEffect(() => { loadEntries(); }, [loadEntries]);
 
   useEffect(() => {
-    fetch('api/v1/audit/event-types', { credentials: 'include' })
+    fetch('/api/v1/audit/event-types', { credentials: 'include' })
       .then((r) => r.json())
       .then((d) => setEventTypes(d.eventTypes ?? []))
       .catch(() => {});
 
     if (canViewAny) {
-      fetch('api/v1/audit/users', { credentials: 'include' })
+      fetch('/api/v1/audit/users', { credentials: 'include' })
         .then((r) => r.json())
         .then((d) => setAuditUsers(d.users ?? []))
         .catch(() => {});
@@ -312,7 +312,7 @@ export function AuditTrail() {
   async function exportData(format: 'csv' | 'json') {
     const p = buildParams(1);
     p.set('limit', '10000');
-    const res = await fetch(`api/v1/audit?${p}`, { credentials: 'include' });
+    const res = await fetch(`/api/v1/audit?${p}`, { credentials: 'include' });
     if (!res.ok) return;
     const d = await res.json();
     const rows: AuditEntry[] = d.entries;

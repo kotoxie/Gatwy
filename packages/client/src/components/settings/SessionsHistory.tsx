@@ -81,7 +81,7 @@ function VideoPlayer({
     let url: string | null = null;
     async function load() {
       try {
-        const res = await fetch(`api/v1/sessions/${sessionId}/recording`, {
+        const res = await fetch(`/api/v1/sessions/${sessionId}/recording`, {
           credentials: 'include',
         });
         if (!res.ok) throw new Error('Recording not found');
@@ -101,7 +101,7 @@ function VideoPlayer({
 
   // Fetch activity events
   useEffect(() => {
-    fetch(`api/v1/sessions/${sessionId}/recording/events`, { credentials: 'include' })
+    fetch(`/api/v1/sessions/${sessionId}/recording/events`, { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.events) setRawEvents(d.events); })
       .catch(() => {});
@@ -132,7 +132,7 @@ function VideoPlayer({
     if (downloading) return;
     setDownloading(true);
     try {
-      const res = await fetch(`api/v1/sessions/${sessionId}/recording`, {
+      const res = await fetch(`/api/v1/sessions/${sessionId}/recording`, {
         credentials: 'include',
       });
       if (!res.ok) throw new Error();
@@ -397,7 +397,7 @@ function RecordingPlayer({
     if (downloading) return;
     setDownloading(true);
     try {
-      const res = await fetch(`api/v1/sessions/${sessionId}/recording`, {
+      const res = await fetch(`/api/v1/sessions/${sessionId}/recording`, {
         credentials: 'include',
       });
       if (!res.ok) throw new Error();
@@ -477,7 +477,7 @@ function RecordingPlayer({
     fitRef.current = fit;
     async function load() {
       try {
-        const res = await fetch(`api/v1/sessions/${sessionId}/recording`, {
+        const res = await fetch(`/api/v1/sessions/${sessionId}/recording`, {
           credentials: 'include',
         });
         if (!res.ok) throw new Error('Recording not found or unavailable');
@@ -490,7 +490,7 @@ function RecordingPlayer({
         setLoading(false);
         scheduleFrom(0);
         // Fetch SSH commands in parallel
-        fetch(`api/v1/sessions/${sessionId}/commands`, { credentials: 'include' })
+        fetch(`/api/v1/sessions/${sessionId}/commands`, { credentials: 'include' })
           .then(r => r.ok ? r.json() : null)
           .then(data => { if (data?.commands?.length) setCommands(data.commands); })
           .catch(() => {});
@@ -728,7 +728,7 @@ function FileSessionTimeline({ sessionId, onClose }: { sessionId: string; onClos
   }, [onClose]);
 
   useEffect(() => {
-    fetch(`api/v1/file-sessions/${sessionId}/events`, { credentials: 'include' })
+    fetch(`/api/v1/file-sessions/${sessionId}/events`, { credentials: 'include' })
       .then((r) => r.json())
       .then((d: { events: FileEvent[] }) => { setEvents(d.events); setLoading(false); })
       .catch(() => { setError('Failed to load events'); setLoading(false); });
@@ -792,7 +792,7 @@ function FileActivity() {
   async function downloadFileSession(s: FileSessionRow, format: 'json' | 'csv') {
     setDownloadMenuId(null);
     try {
-      const res = await fetch(`api/v1/file-sessions/${s.id}/export?format=${format}`, { credentials: 'include' });
+      const res = await fetch(`/api/v1/file-sessions/${s.id}/export?format=${format}`, { credentials: 'include' });
       if (!res.ok) return;
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -808,7 +808,7 @@ function FileActivity() {
 
   const load = useCallback(() => {
     setLoading(true);
-    fetch('api/v1/file-sessions?limit=2000', { credentials: 'include' })
+    fetch('/api/v1/file-sessions?limit=2000', { credentials: 'include' })
       .then((r) => r.json())
       .then((d: { sessions: FileSessionRow[] }) => { setSessions(d.sessions); setLoading(false); })
       .catch(() => setLoading(false));
@@ -1025,7 +1025,7 @@ export function SessionsHistory() {
   async function loadSessions() {
     setLoading(true);
     try {
-      const res = await fetch('api/v1/sessions?limit=2000', { credentials: 'include' });
+      const res = await fetch('/api/v1/sessions?limit=2000', { credentials: 'include' });
       if (res.ok) {
         const d = await res.json() as { sessions: SessionRow[] };
         // Only keep sessions that have a recording
@@ -1039,7 +1039,7 @@ export function SessionsHistory() {
     if (downloadingId) return;
     setDownloadingId(s.id);
     try {
-      const res = await fetch(`api/v1/sessions/${s.id}/recording`, {
+      const res = await fetch(`/api/v1/sessions/${s.id}/recording`, {
         credentials: 'include',
       });
       if (!res.ok) throw new Error('Download failed');

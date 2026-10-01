@@ -40,18 +40,18 @@ export function FolderShareModal({ groupId, groupName, onClose, onSaved }: Folde
   const [warnings, setWarnings] = useState<{ connectionId: string; connectionName: string }[] | null>(null);
 
   useEffect(() => {
-    fetch('api/v1/roles', { credentials: 'include' })
+    fetch('/api/v1/roles', { credentials: 'include' })
       .then(r => r.json())
       .then(d => { if (Array.isArray(d)) setShareRoles(d.map((r: { id: string; name: string }) => ({ id: r.id, name: r.name }))); })
       .catch(() => {});
-    fetch('api/v1/users', { credentials: 'include' })
+    fetch('/api/v1/users', { credentials: 'include' })
       .then(r => r.json())
       .then(d => { if (d?.users && Array.isArray(d.users)) setShareUsers(d.users.map((u: { id: string; username: string }) => ({ id: u.id, username: u.username }))); })
       .catch(() => {});
   }, []);
 
   useEffect(() => {
-    fetch(`api/v1/connections/groups/${groupId}/shares`, { credentials: 'include' })
+    fetch(`/api/v1/connections/groups/${groupId}/shares`, { credentials: 'include' })
       .then(r => r.json())
       .then((d: { shares: { shareType: string; targetId: string; capability?: string }[]; warnings: { connectionId: string; connectionName: string }[] }) => {
         if (!Array.isArray(d.shares)) return;
@@ -92,7 +92,7 @@ export function FolderShareModal({ groupId, groupName, onClose, onSaved }: Folde
         ...Object.entries(roleCapabilities).map(([id, capability]) => ({ shareType: 'role', targetId: id, capability })),
         ...Object.entries(userCapabilities).map(([id, capability]) => ({ shareType: 'user', targetId: id, capability })),
       ];
-      const res = await fetch(`api/v1/connections/groups/${groupId}/shares`, {
+      const res = await fetch(`/api/v1/connections/groups/${groupId}/shares`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

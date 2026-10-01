@@ -158,7 +158,7 @@ export function MainLayout() {
   const showKeyBanner = insecureKey && !permanentlyDismissed && !remindLater;
 
   const dismissKeyForever = async () => {
-    await fetch('api/v1/profile/dismiss-warning', {
+    await fetch('/api/v1/profile/dismiss-warning', {
       method: 'POST', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ warning: 'insecure_key' }),
@@ -172,7 +172,7 @@ export function MainLayout() {
   };
 
   const dismissAutoBackupWelcome = async () => {
-    await fetch('api/v1/profile/dismiss-warning', {
+    await fetch('/api/v1/profile/dismiss-warning', {
       method: 'POST', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ warning: AUTO_BACKUP_WELCOME_KEY }),

@@ -22,7 +22,7 @@ export function useVersionCheck(): VersionInfo {
 
   const check = useCallback(async (force = false) => {
     try {
-      const url = force ? 'api/v1/version?force=true' : 'api/v1/version';
+      const url = force ? '/api/v1/version?force=true' : '/api/v1/version';
       const res = await fetch(url);
       if (!res.ok) return;
       const data = await res.json() as {

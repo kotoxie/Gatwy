@@ -230,7 +230,7 @@ export function CommandPalette({ isOpen, onClose, onConnect }: CommandPalettePro
     const controller = new AbortController();
     (async () => {
       try {
-        const res = await fetch('api/v1/connections', {
+        const res = await fetch('/api/v1/connections', {
           credentials: 'include',
           signal: controller.signal,
         });

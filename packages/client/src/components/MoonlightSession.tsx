@@ -79,7 +79,7 @@ export function MoonlightSession({
 
   const auditDisconnect = useCallback(async () => {
     try {
-      await fetch(`api/v1/moonlight/${connectionId}/disconnect-audit`, {
+      await fetch(`/api/v1/moonlight/${connectionId}/disconnect-audit`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -101,7 +101,7 @@ export function MoonlightSession({
     setPin(null);
     setErrorMsg('');
 
-    const res = await fetch(`api/v1/moonlight/${connectionId}/pair`, {
+    const res = await fetch(`/api/v1/moonlight/${connectionId}/pair`, {
       method: 'POST',
       credentials: 'include',
       signal,
@@ -144,7 +144,7 @@ export function MoonlightSession({
 
   const startStream = useCallback(async (signal: AbortSignal) => {
     applyMoonlightChrome();
-    const res = await fetch(`api/v1/moonlight/${connectionId}/session`, {
+    const res = await fetch(`/api/v1/moonlight/${connectionId}/session`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -179,7 +179,7 @@ export function MoonlightSession({
         setStreamUrl(null);
         setShowPairModal(false);
 
-        const statusRes = await fetch(`api/v1/moonlight/${connectionId}/status`, {
+        const statusRes = await fetch(`/api/v1/moonlight/${connectionId}/status`, {
           credentials: 'include',
           signal: abort.signal,
         });

@@ -9,15 +9,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const { normalizeBasePath } = await import('../src/config.js');
+const { normalizeBasePath, config } = await import('../src/config.js');
 const { renderIndexHtml } = await import('../src/services/indexHtml.js');
 
 describe('normalizeBasePath', () => {
-  it('defaults to root for unset/empty input (no regression for existing deployments)', () => {
-    assert.equal(normalizeBasePath(undefined), '');
-    assert.equal(normalizeBasePath(''), '');
-    assert.equal(normalizeBasePath('   '), '');
-    assert.equal(normalizeBasePath('/'), '');
+  it("defaults to the root sentinel '/' for unset/empty input (no regression for existing deployments)", () => {
+    assert.equal(normalizeBasePath(undefined), '/');
+    assert.equal(normalizeBasePath(''), '/');
+    assert.equal(normalizeBasePath('   '), '/');
+    assert.equal(normalizeBasePath('/'), '/');
   });
 
   it('ensures exactly one leading slash and no trailing slash', () => {
@@ -25,6 +25,20 @@ describe('normalizeBasePath', () => {
     assert.equal(normalizeBasePath('/sys/ftp'), '/sys/ftp');
     assert.equal(normalizeBasePath('/sys/ftp/'), '/sys/ftp');
     assert.equal(normalizeBasePath('sys/ftp/'), '/sys/ftp');
+  });
+});
+
+describe('basePathPrefix', () => {
+  it("converts the root sentinel '/' to '' so route mounts never get a doubled leading slash", () => {
+    const prev = config.basePath;
+    try {
+      config.basePath = '/';
+      assert.equal(config.basePathPrefix, '');
+      config.basePath = '/sys/ftp';
+      assert.equal(config.basePathPrefix, '/sys/ftp');
+    } finally {
+      config.basePath = prev;
+    }
   });
 });
 
@@ -54,7 +68,7 @@ describe('renderIndexHtml', () => {
   });
 
   it('leaves root-absolute references untouched at the root (no regression)', () => {
-    const html = renderIndexHtml(clientDir, '');
+    const html = renderIndexHtml(clientDir, '');  // '' — see basePathPrefix above
     assert.match(html, /href="\/favicon\.png"/);
     assert.match(html, /href="\/manifest\.webmanifest"/);
     assert.match(html, /href="\/assets\/index-abc123\.css"/);

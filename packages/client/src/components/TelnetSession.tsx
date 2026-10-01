@@ -6,7 +6,6 @@ import '@xterm/xterm/css/xterm.css';
 import type { Tab } from '../pages/MainLayout';
 import { useAuth } from '../hooks/useAuth';
 import { getWsTicket } from '../lib/wsTicket';
-import { BASE_PATH } from '../lib/basePath';
 
 interface TelnetSessionProps {
   tab: Tab;
@@ -99,7 +98,7 @@ export function TelnetSession({ tab, isActive, paneWidth, paneHeight, onStatusCh
       }
 
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${proto}//${window.location.host}${BASE_PATH}/ws/telnet?ticket=${encodeURIComponent(ticket)}&connectionId=${encodeURIComponent(tab.connectionId)}&sessionId=${encodeURIComponent(tab.clientSessionId)}`;
+      const wsUrl = `${proto}//${window.location.host}/ws/telnet?ticket=${encodeURIComponent(ticket)}&connectionId=${encodeURIComponent(tab.connectionId)}&sessionId=${encodeURIComponent(tab.clientSessionId)}`;
       const ws = new WebSocket(wsUrl);
       ws.binaryType = 'arraybuffer';
       wsRef.current = ws;

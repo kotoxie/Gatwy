@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 
-const API = 'api/v1/notifications';
+const API = '/api/v1/notifications';
 
 async function apiFetch(path: string, opts?: RequestInit) {
   const res = await fetch(API + path, { credentials: 'include', ...opts });

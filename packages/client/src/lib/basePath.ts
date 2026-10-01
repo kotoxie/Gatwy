@@ -3,10 +3,11 @@
  * runtime via a `<meta name="gatwy-base-path">` tag in index.html (see
  * packages/server/src/services/indexHtml.ts). Empty string when served at the root.
  *
- * Most client code never needs this directly: fetch calls use document-relative paths
- * ('api/v1/...', no leading slash) that resolve against the `<base href>` the server also
- * injects. BASE_PATH is only needed where an absolute URL is built manually — WebSocket URLs
- * (which must include scheme + host) and the OIDC redirect URI shown to admins.
+ * Most client code never needs this directly: every existing `fetch('/api/...')` and
+ * `new WebSocket('.../ws/...')` call site keeps working unmodified — `main.tsx`'s global
+ * fetch/WebSocket patches rewrite those same-origin, root-absolute requests with this prefix
+ * once, at the source. BASE_PATH is only imported directly where an absolute URL is built for
+ * *display*, not a request — the OIDC redirect URI shown to admins.
  */
 export const BASE_PATH: string = (() => {
   if (typeof document === 'undefined') return '';

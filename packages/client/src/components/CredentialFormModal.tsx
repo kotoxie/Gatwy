@@ -75,7 +75,7 @@ export function CredentialFormModal({ editing, canShare, onClose, onSaved, onCon
       }
       if (canShare) body.shared = shared;
 
-      const res = await fetch(editing ? `api/v1/credentials/${editing.id}` : 'api/v1/credentials', {
+      const res = await fetch(editing ? `/api/v1/credentials/${editing.id}` : '/api/v1/credentials', {
         method: editing ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

@@ -9,7 +9,6 @@ import { VncTwoFingerScroll } from './VncTwoFingerScroll';
 import { applyVncPointerMap } from '../lib/vncPointerMap';
 import { loadVncTouchMode, saveVncTouchMode, type VncTouchMode } from '../lib/vncTouchMode';
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer';
-import { BASE_PATH } from '../lib/basePath';
 
 interface VncSessionProps {
   connectionId: string;
@@ -66,7 +65,7 @@ export function VncSession({ connectionId, connectionName, isActive, onStatusCha
     async function connect() {
       try {
         // Fetch credentials from session endpoint (username required for macOS ARD / type 30)
-        const res = await fetch(`api/v1/connections/${connectionId}/session`, {
+        const res = await fetch(`/api/v1/connections/${connectionId}/session`, {
           credentials: 'include',
         });
         if (!res.ok) throw new Error('Failed to fetch connection credentials');
@@ -82,7 +81,7 @@ export function VncSession({ connectionId, connectionName, isActive, onStatusCha
         if (cancelled) return;
 
         const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${proto}//${window.location.host}${BASE_PATH}/ws/vnc/${connectionId}?ticket=${encodeURIComponent(ticket)}`;
+        const wsUrl = `${proto}//${window.location.host}/ws/vnc/${connectionId}?ticket=${encodeURIComponent(ticket)}`;
 
         const container = containerRef.current!;
         container.innerHTML = '';

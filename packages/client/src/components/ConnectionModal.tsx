@@ -287,7 +287,7 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill,
   // Load full details when editing an existing connection
   useEffect(() => {
     if (!connection?.id) return;
-    fetch(`api/v1/connections/${connection.id}`, { credentials: 'include' })
+    fetch(`/api/v1/connections/${connection.id}`, { credentials: 'include' })
       .then((r) => r.json())
       .then((d) => {
         if (d.username) setUsername(d.username);
@@ -325,11 +325,11 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill,
 
   // Load roles and users for sharing dropdowns
   useEffect(() => {
-    fetch('api/v1/roles', { credentials: 'include' })
+    fetch('/api/v1/roles', { credentials: 'include' })
       .then(r => r.json())
       .then(d => { if (Array.isArray(d)) setShareRoles(d.map((r: { id: string; name: string }) => ({ id: r.id, name: r.name }))); })
       .catch(() => {});
-    fetch('api/v1/users', { credentials: 'include' })
+    fetch('/api/v1/users', { credentials: 'include' })
       .then(r => r.json())
       .then(d => { if (d?.users && Array.isArray(d.users)) setShareUsers(d.users.map((u: { id: string; username: string }) => ({ id: u.id, username: u.username }))); })
       .catch(() => {});
@@ -344,7 +344,7 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill,
     const name = newFolderName.trim();
     if (!name) return;
     try {
-      const res = await fetch('api/v1/connections/groups', {
+      const res = await fetch('/api/v1/connections/groups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -371,7 +371,7 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill,
       const usesManualSecret = protocol !== 'moonlight' && !(protocol === 'ssh' && promptOnConnect);
       if (!linkedCredentialId && saveToLibrary && usesManualSecret) {
         const isKey = protocol === 'ssh' && !!privateKey.trim();
-        const credRes = await fetch('api/v1/credentials', {
+        const credRes = await fetch('/api/v1/credentials', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -450,7 +450,7 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill,
         body.skipCertValidation = skipCertValidation;
       }
       body.tags = tags;
-      const url = connection ? `api/v1/connections/${connection.id}` : 'api/v1/connections';
+      const url = connection ? `/api/v1/connections/${connection.id}` : '/api/v1/connections';
       const method = connection ? 'PUT' : 'POST';
       const res = await fetch(url, {
         method,
@@ -477,7 +477,7 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill,
           ...selectedShareRoles.map(id => ({ shareType: 'role', targetId: id })),
           ...selectedShareUsers.map(id => ({ shareType: 'user', targetId: id })),
         ];
-        const shareRes = await fetch(`api/v1/connections/${connId}/shares`, {
+        const shareRes = await fetch(`/api/v1/connections/${connId}/shares`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -488,7 +488,7 @@ export function ConnectionModal({ connection, groups, onClose, onSaved, prefill,
           throw new Error(data.error || `Could not save sharing (${shareRes.status})`);
         }
       } else if (connId && connection) {
-        await fetch(`api/v1/connections/${connId}/shares`, {
+        await fetch(`/api/v1/connections/${connId}/shares`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',

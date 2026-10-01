@@ -83,7 +83,7 @@ export function SchemaTree({ connectionId, protocol, defaultDatabase, rowLimit, 
   const fetchSchemas = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch(`api/v1/db/${connectionId}/schemas`, { credentials: 'include' });
+      const r = await fetch(`/api/v1/db/${connectionId}/schemas`, { credentials: 'include' });
       const d = await r.json() as { schemas?: string[] };
       if (Array.isArray(d.schemas)) {
         setSchemas(d.schemas);
@@ -98,7 +98,7 @@ export function SchemaTree({ connectionId, protocol, defaultDatabase, rowLimit, 
 
   const fetchTables = useCallback(async (schema: string) => {
     try {
-      const r = await fetch(`api/v1/db/${connectionId}/tables?schema=${encodeURIComponent(schema)}`, { credentials: 'include' });
+      const r = await fetch(`/api/v1/db/${connectionId}/tables?schema=${encodeURIComponent(schema)}`, { credentials: 'include' });
       const d = await r.json() as { tables?: Array<{ name: string; type: string }> };
       if (Array.isArray(d.tables)) {
         setTablesBySchema(prev => ({ ...prev, [schema]: d.tables! }));
@@ -109,7 +109,7 @@ export function SchemaTree({ connectionId, protocol, defaultDatabase, rowLimit, 
   const fetchColumns = useCallback(async (schema: string, table: string) => {
     const key = `${schema}/${table}`;
     try {
-      const r = await fetch(`api/v1/db/${connectionId}/table/${encodeURIComponent(table)}?schema=${encodeURIComponent(schema)}`, { credentials: 'include' });
+      const r = await fetch(`/api/v1/db/${connectionId}/table/${encodeURIComponent(table)}?schema=${encodeURIComponent(schema)}`, { credentials: 'include' });
       const d = await r.json() as { columns?: Array<{ name: string; type: string; nullable: boolean; isPrimaryKey: boolean }> };
       if (Array.isArray(d.columns)) {
         setColumnsByTable(prev => ({ ...prev, [key]: d.columns! }));

@@ -97,7 +97,7 @@ export function SecuritySettings() {
   }, [settings]);
 
   useEffect(() => {
-    fetch('api/v1/settings/ip-rules', { credentials: 'include' })
+    fetch('/api/v1/settings/ip-rules', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { enabled: boolean; mode: 'allowlist' | 'denylist'; currentIp: string; rules: IpRule[] } | null) => {
         if (!d) return;
@@ -110,7 +110,7 @@ export function SecuritySettings() {
   }, []);
 
   async function saveSetting(updates: Record<string, string>, onSuccess: () => void, onError: (msg: string) => void) {
-    const res = await fetch('api/v1/settings', {
+    const res = await fetch('/api/v1/settings', {
       method: 'PUT',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -195,7 +195,7 @@ export function SecuritySettings() {
   }
 
   async function persistIpRules() {
-    const res = await fetch('api/v1/settings/ip-rules', {
+    const res = await fetch('/api/v1/settings/ip-rules', {
       method: 'PUT',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },

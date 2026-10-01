@@ -33,7 +33,7 @@ export function LoginPage() {
   const autoSubmittingRef = useRef(false);
 
   useEffect(() => {
-    fetch('api/v1/auth/providers')
+    fetch('/api/v1/auth/providers')
       .then((r) => r.json())
       .then((d) => {
         const cfg = d as ProvidersConfig;
@@ -55,7 +55,7 @@ export function LoginPage() {
   }, []);
 
   useEffect(() => {
-    fetch('api/v1/settings/public')
+    fetch('/api/v1/settings/public')
       .then(r => r.json())
       .then((d: { settings?: Record<string, string> }) => {
         if (d?.settings?.['system.insecure_key'] === 'true') setInsecureKey(true);
@@ -74,7 +74,7 @@ export function LoginPage() {
       const effectiveMethod = loginMethod === 'ldap' || (!providers?.local && providers?.ldap) ? 'ldap' : 'local';
       if (effectiveMethod === 'ldap') {
         // Call LDAP endpoint directly
-        const res = await fetch('api/v1/auth/login/ldap', {
+        const res = await fetch('/api/v1/auth/login/ldap', {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
@@ -102,7 +102,7 @@ export function LoginPage() {
 
   async function handleSsoLogin() {
     try {
-      const res = await fetch('api/v1/auth/oidc/authorize', { credentials: 'include' });
+      const res = await fetch('/api/v1/auth/oidc/authorize', { credentials: 'include' });
       const data = await res.json() as { url?: string; error?: string };
       if (data.url) {
         window.location.href = data.url;
@@ -142,7 +142,7 @@ export function LoginPage() {
 
     try {
       // Get authentication options from server
-      const optionsRes = await fetch('api/v1/auth/login/passkey/options', {
+      const optionsRes = await fetch('/api/v1/auth/login/passkey/options', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -158,7 +158,7 @@ export function LoginPage() {
       const authResponse = await startAuthentication({ optionsJSON: optionsData.options as Parameters<typeof startAuthentication>[0]['optionsJSON'] });
 
       // Verify with server
-      const verifyRes = await fetch('api/v1/auth/login/passkey', {
+      const verifyRes = await fetch('/api/v1/auth/login/passkey', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -205,7 +205,7 @@ export function LoginPage() {
     setSsoError(null);
 
     try {
-      const optionsRes = await fetch('api/v1/auth/login/passkey/options', {
+      const optionsRes = await fetch('/api/v1/auth/login/passkey/options', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -219,7 +219,7 @@ export function LoginPage() {
 
       const authResponse = await startAuthentication({ optionsJSON: optionsData.options as Parameters<typeof startAuthentication>[0]['optionsJSON'] });
 
-      const verifyRes = await fetch('api/v1/auth/login/passkey', {
+      const verifyRes = await fetch('/api/v1/auth/login/passkey', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },

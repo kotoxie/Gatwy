@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useAuth } from '../../../hooks/useAuth';
 import { showToast } from '../../../hooks/useToast';
 
-const API = 'api/v1/notifications';
+const API = '/api/v1/notifications';
 
 async function apiFetch(path: string, opts?: RequestInit) {
   const res = await fetch(API + path, { credentials: 'include', ...opts });

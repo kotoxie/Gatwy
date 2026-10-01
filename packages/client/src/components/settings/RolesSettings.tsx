@@ -29,12 +29,12 @@ export function RolesSettings() {
   const [deleteConfirm, setDeleteConfirm] = useState<Role | null>(null);
 
   const loadRoles = useCallback(async () => {
-    const res = await fetch('api/v1/roles', { credentials: 'include' });
+    const res = await fetch('/api/v1/roles', { credentials: 'include' });
     if (res.ok) { const d = await res.json(); setRoles(d); }
   }, []);
 
   const loadPermGroups = useCallback(async () => {
-    const res = await fetch('api/v1/roles/permissions', { credentials: 'include' });
+    const res = await fetch('/api/v1/roles/permissions', { credentials: 'include' });
     if (res.ok) { const d = await res.json(); setPermGroups(d); }
   }, []);
 
@@ -92,7 +92,7 @@ export function RolesSettings() {
     setError('');
     try {
       const body = { name: name.trim(), description: description.trim(), permissions: [...selectedPerms] };
-      const url = editing ? `api/v1/roles/${editing.id}` : 'api/v1/roles';
+      const url = editing ? `/api/v1/roles/${editing.id}` : '/api/v1/roles';
       const method = editing ? 'PUT' : 'POST';
       const res = await fetch(url, {
         method,
@@ -110,7 +110,7 @@ export function RolesSettings() {
 
   async function handleDelete(role: Role) {
     setDeleteConfirm(null);
-    const res = await fetch(`api/v1/roles/${role.id}`, { method: 'DELETE', credentials: 'include' });
+    const res = await fetch(`/api/v1/roles/${role.id}`, { method: 'DELETE', credentials: 'include' });
     if (!res.ok) { const d = await res.json(); setError(d.error || 'Delete failed'); return; }
     loadRoles();
   }
@@ -121,7 +121,7 @@ export function RolesSettings() {
     setError('');
     setResetConfirm(false);
     try {
-      const res = await fetch(`api/v1/roles/${editing.id}/reset`, {
+      const res = await fetch(`/api/v1/roles/${editing.id}/reset`, {
         method: 'POST',
         credentials: 'include',
       });

@@ -121,7 +121,7 @@ function ManualBackupTab() {
 
   useEffect(() => {
     setSizeLoading(true);
-    fetch('api/v1/backup/size', { credentials: 'include' })
+    fetch('/api/v1/backup/size', { credentials: 'include' })
       .then((r) => r.ok ? r.json() as Promise<SizeInfo> : Promise.reject())
       .then((d) => setSizeInfo(d))
       .catch(() => setSizeInfo(null))
@@ -134,7 +134,7 @@ function ManualBackupTab() {
     if (exportPassword !== exportConfirm) { showToast('Passwords do not match.', 'error'); return; }
     setExportLoading(true);
     try {
-      const res = await fetch('api/v1/backup/export', {
+      const res = await fetch('/api/v1/backup/export', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: exportPassword, includeRecordings }),
@@ -169,7 +169,7 @@ function ManualBackupTab() {
     setShowConfirm(false);
     try {
       const arrayBuf = await importFile.arrayBuffer();
-      const res = await fetch('api/v1/backup/import', {
+      const res = await fetch('/api/v1/backup/import', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/octet-stream', 'X-Backup-Password': importPassword },
@@ -338,7 +338,7 @@ function AutoBackupTab() {
   async function loadHistory(page: number) {
     setHistoryLoading(true);
     try {
-      const histRes = await fetch(`api/v1/backup/auto/history?limit=${HISTORY_PAGE_SIZE}&page=${page}`, { credentials: 'include' });
+      const histRes = await fetch(`/api/v1/backup/auto/history?limit=${HISTORY_PAGE_SIZE}&page=${page}`, { credentials: 'include' });
       if (histRes.ok) {
         const data = await histRes.json() as AutoHistoryResponse;
         setHistory(data.rows ?? []);
@@ -354,10 +354,10 @@ function AutoBackupTab() {
     setLoading(true);
     try {
       const [cfgRes, stRes, conRes, capRes] = await Promise.all([
-        fetch('api/v1/backup/auto/config', { credentials: 'include' }),
-        fetch('api/v1/backup/auto/status', { credentials: 'include' }),
-        fetch('api/v1/backup/auto/connections', { credentials: 'include' }),
-        fetch('api/v1/backup/auto/capabilities', { credentials: 'include' }),
+        fetch('/api/v1/backup/auto/config', { credentials: 'include' }),
+        fetch('/api/v1/backup/auto/status', { credentials: 'include' }),
+        fetch('/api/v1/backup/auto/connections', { credentials: 'include' }),
+        fetch('/api/v1/backup/auto/capabilities', { credentials: 'include' }),
       ]);
 
       if (capRes.ok) {
@@ -446,7 +446,7 @@ function AutoBackupTab() {
         return;
       }
 
-      const res = await fetch('api/v1/backup/auto/config', {
+      const res = await fetch('/api/v1/backup/auto/config', {
         method: 'PUT',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -482,7 +482,7 @@ function AutoBackupTab() {
   async function testDestination() {
     setTesting(true);
     try {
-      const res = await fetch('api/v1/backup/auto/test', {
+      const res = await fetch('/api/v1/backup/auto/test', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -514,7 +514,7 @@ function AutoBackupTab() {
   async function runNow() {
     setRunningNow(true);
     try {
-      const res = await fetch('api/v1/backup/auto/run-now', {
+      const res = await fetch('/api/v1/backup/auto/run-now', {
         method: 'POST',
         credentials: 'include',
       });

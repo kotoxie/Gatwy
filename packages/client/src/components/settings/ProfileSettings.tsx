@@ -136,7 +136,7 @@ export function ProfileSettings() {
 
   async function loadSessions() {
     try {
-      const res = await fetch('api/v1/profile/login-sessions', {
+      const res = await fetch('/api/v1/profile/login-sessions', {
         credentials: 'include',
       });
       if (res.ok) {
@@ -150,7 +150,7 @@ export function ProfileSettings() {
 
   async function loadMfaStatus() {
     try {
-      const res = await fetch('api/v1/profile/mfa/method', { credentials: 'include' });
+      const res = await fetch('/api/v1/profile/mfa/method', { credentials: 'include' });
       if (!res.ok) return;
       const d = await res.json() as { enabled: boolean; method: 'totp' | 'passkey' | null };
       setMfaEnabled(d.enabled);
@@ -162,7 +162,7 @@ export function ProfileSettings() {
 
   async function loadPasskeys() {
     try {
-      const res = await fetch('api/v1/profile/passkeys', {
+      const res = await fetch('/api/v1/profile/passkeys', {
         credentials: 'include',
       });
       if (res.ok) {
@@ -183,7 +183,7 @@ export function ProfileSettings() {
   }
 
   useEffect(() => {
-    fetch('api/v1/profile', { credentials: 'include' })
+    fetch('/api/v1/profile', { credentials: 'include' })
       .then((r) => r.json())
       .then((d: ProfileData) => {
         setProfile(d);
@@ -206,7 +206,7 @@ export function ProfileSettings() {
     e.preventDefault();
     setSaving(true);
     try {
-      const res = await fetch('api/v1/profile', {
+      const res = await fetch('/api/v1/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -237,7 +237,7 @@ export function ProfileSettings() {
     }
     setSavingPw(true);
     try {
-      const res = await fetch('api/v1/profile/password', {
+      const res = await fetch('/api/v1/profile/password', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -263,7 +263,7 @@ export function ProfileSettings() {
 
   async function handleRevoke(id: string) {
     try {
-      await fetch(`api/v1/profile/login-sessions/${id}`, {
+      await fetch(`/api/v1/profile/login-sessions/${id}`, {
         method: 'DELETE',
         credentials: 'include',
       });
@@ -276,7 +276,7 @@ export function ProfileSettings() {
   async function handleMfaSetup() {
     setMfaLoading(true);
     try {
-      const res = await fetch('api/v1/profile/mfa/setup', {
+      const res = await fetch('/api/v1/profile/mfa/setup', {
         method: 'POST',
         credentials: 'include',
       });
@@ -299,7 +299,7 @@ export function ProfileSettings() {
     e.preventDefault();
     setMfaLoading(true);
     try {
-      const res = await fetch('api/v1/profile/mfa/verify', {
+      const res = await fetch('/api/v1/profile/mfa/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -326,7 +326,7 @@ export function ProfileSettings() {
     e.preventDefault();
     setMfaLoading(true);
     try {
-      const res = await fetch('api/v1/profile/mfa/disable', {
+      const res = await fetch('/api/v1/profile/mfa/disable', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -351,7 +351,7 @@ export function ProfileSettings() {
 
   async function handleRevokeAll() {
     try {
-      await fetch('api/v1/profile/login-sessions', {
+      await fetch('/api/v1/profile/login-sessions', {
         method: 'DELETE',
         credentials: 'include',
       });
@@ -371,7 +371,7 @@ export function ProfileSettings() {
 
     try {
       // Get registration options from server
-      const optionsRes = await fetch('api/v1/profile/passkeys/register/options', {
+      const optionsRes = await fetch('/api/v1/profile/passkeys/register/options', {
         method: 'POST',
         credentials: 'include',
       });
@@ -385,7 +385,7 @@ export function ProfileSettings() {
       const regResponse = await startRegistration({ optionsJSON: options as Parameters<typeof startRegistration>[0]['optionsJSON'] });
 
       // Verify with server
-      const verifyRes = await fetch('api/v1/profile/passkeys/register/verify', {
+      const verifyRes = await fetch('/api/v1/profile/passkeys/register/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -425,7 +425,7 @@ export function ProfileSettings() {
     setPasskeyLoading(true);
 
     try {
-      const res = await fetch(`api/v1/profile/passkeys/${id}`, {
+      const res = await fetch(`/api/v1/profile/passkeys/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -449,7 +449,7 @@ export function ProfileSettings() {
     setPasskeyLoading(true);
 
     try {
-      const res = await fetch(`api/v1/profile/passkeys/${id}`, {
+      const res = await fetch(`/api/v1/profile/passkeys/${id}`, {
         method: 'DELETE',
         credentials: 'include',
       });
