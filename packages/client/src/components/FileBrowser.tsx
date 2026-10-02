@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { BASE_PATH } from '../lib/basePath';
 interface FileEntry {
   filename: string;
   fileAttributes: number;
@@ -309,7 +310,7 @@ export function FileBrowser({
     try {
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        xhr.open('POST', `${apiBase}/${connectionId}/upload?path=${encodeURIComponent(filePath)}`);
+        xhr.open('POST', `${BASE_PATH}${apiBase}/${connectionId}/upload?path=${encodeURIComponent(filePath)}`);
         xhr.withCredentials = true;
         xhr.setRequestHeader('Content-Type', 'application/octet-stream');
         if (fileSessionId) xhr.setRequestHeader('X-File-Session-Id', fileSessionId);

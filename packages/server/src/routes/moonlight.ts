@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { v4 as uuid } from 'uuid';
 import { queryOne, execute } from '../db/helpers.js';
 import { authRequired } from '../middleware/auth.js';
+import { config } from '../config.js';
 import { userHasPermission, wsCanAccess } from '../services/permissions.js';
 import { logAudit } from '../services/audit.js';
 import { resolveClientIp } from '../services/ip.js';
@@ -400,7 +401,7 @@ router.post('/:id/session', async (req: Request, res: Response) => {
       hostId,
       appId: app.app_id,
       appTitle: app.title,
-      streamPath: `/mlw/stream.html?hostId=${hostId}&appId=${app.app_id}`,
+      streamPath: `${config.basePathPrefix}/mlw/stream.html?hostId=${hostId}&appId=${app.app_id}`,
       bitrateKbps,
       fps,
       resolution,
