@@ -5,6 +5,7 @@ import { queryOne } from '../db/helpers.js';
 import { isSessionRevoked } from '../services/loginSession.js';
 import { registerWs, unregisterWs } from './wsRegistry.js';
 import { acquireConnection, releaseConnection } from './connectionLimits.js';
+import { addActiveSession, removeActiveSession } from './activeSessions.js';
 import { redeemWsTicket } from '../services/wsTicket.js';
 import { userHasPermission, wsCanAccess } from '../services/permissions.js';
 import { logAudit } from '../services/audit.js';
@@ -36,8 +37,8 @@ export function setupVncProxy(server: Server, basePath = ''): void {
     if (!userHasPermission(userId, 'protocols.vnc')) { socket.destroy(); return; }
 
     const access = wsCanAccess(userId);
-    const conn = queryOne<{ host: string; port: number; user_id: string; shared: number }>(
-      `SELECT host, port, user_id, shared FROM connections WHERE id = ? AND ${access.where} AND protocol = 'vnc'`,
+    const conn = queryOne<{ name: string; host: string; port: number; user_id: string; shared: number }>(
+      `SELECT name, host, port, user_id, shared FROM connections WHERE id = ? AND ${access.where} AND protocol = 'vnc'`,
       [connectionId, ...access.params],
     );
     if (!conn) { socket.destroy(); return; }
@@ -62,8 +63,13 @@ export function setupVncProxy(server: Server, basePath = ''): void {
         details: { connectionId, sessionId },
         ipAddress: clientIp,
       });
+      addActiveSession({
+        id: sessionId, userId, connectionId, connectionName: conn.name,
+        protocol: 'vnc',
+      });
 
       function teardown() {
+        removeActiveSession(sessionId);
         logAudit({
           userId,
           eventType: 'session.vnc.disconnect',

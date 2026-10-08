@@ -6,6 +6,7 @@ import type https from 'https';
 import { isSessionRevoked } from '../services/loginSession.js';
 import { registerWs, unregisterWs } from './wsRegistry.js';
 import { acquireConnection, releaseConnection } from './connectionLimits.js';
+import { addActiveSession, removeActiveSession } from './activeSessions.js';
 import { redeemWsTicket } from '../services/wsTicket.js';
 import { userHasPermission, wsCanAccess } from '../services/permissions.js';
 import { applyCredential } from '../services/credentials.js';
@@ -308,6 +309,11 @@ export function setupRdpProxy(server: https.Server, basePath = ''): void {
     logAudit({ userId, eventType: 'session.rdp.connect',
       target: `${conn.host}:${conn.port}`,
       details: { connectionId, sessionId, connectionName: conn.name }, ipAddress: clientIp });
+    addActiveSession({
+      id: sessionId, userId, connectionId, connectionName: conn.name,
+      protocol: 'rdp',
+    });
+    ws.once('close', () => removeActiveSession(sessionId));
 
     let tunnel: net.Socket | null = null;
     let tlsTunnel: tls.TLSSocket | null = null;

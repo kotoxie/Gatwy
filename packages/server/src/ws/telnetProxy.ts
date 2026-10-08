@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { registerWs, unregisterWs } from './wsRegistry.js';
 import { acquireConnection, releaseConnection } from './connectionLimits.js';
+import { addActiveSession, removeActiveSession, setActiveSessionStatus } from './activeSessions.js';
 import { queryOne, execute } from '../db/helpers.js';
 import { redeemWsTicket } from '../services/wsTicket.js';
 import { userHasPermission, wsCanAccess } from '../services/permissions.js';
@@ -201,6 +202,7 @@ function teardownSession(
   // once, or the disconnect is audited twice and the user's slot is released twice.
   if (session.tornDown) return;
   session.tornDown = true;
+  removeActiveSession(sessionDbId);
   if (session.castFile) { try { session.castFile.end(); } catch { /**/ } session.castFile = null; }
   try { session.socket.destroy(); } catch { /**/ }
   execute("UPDATE sessions SET ended_at = datetime('now') WHERE id = ?", [sessionDbId]);
@@ -244,6 +246,7 @@ function wireClientWs(
     const s = sessions.get(clientSessionId);
     if (s) {
       s.ws = null;
+      setActiveSessionStatus(sessionDbId, 'grace');
       startGrace(clientSessionId, () =>
         teardownSession(clientSessionId, s, userId, host, port, connectionId, sessionDbId, clientIp));
     }
@@ -287,6 +290,7 @@ export function setupTelnetProxy(server: https.Server, basePath = ''): void {
     if (cached && cached.userId === userId && cached.connectionId === connectionId && cached.tokenHash === tokenHash) {
       clearGrace(clientSessionId);
       cached.ws = ws;
+      setActiveSessionStatus(cached.sessionDbId, 'connected');
       ws.send(JSON.stringify({ type: 'status', message: 'Reattached' }));
       for (const chunk of cached.outputBuffer) {
         if (ws.readyState === WebSocket.OPEN) ws.send(chunk);
@@ -386,6 +390,10 @@ export function setupTelnetProxy(server: https.Server, basePath = ''): void {
       };
       sessions.set(clientSessionId, session);
       sessionStored = true;
+      addActiveSession({
+        id: sessionDbId, userId, connectionId, connectionName: conn.name,
+        protocol: 'telnet',
+      });
 
       // Send initial NAWS
       socket.write(buildNawsSubneg(cols, rows));

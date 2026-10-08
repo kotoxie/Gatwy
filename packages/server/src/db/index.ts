@@ -1168,6 +1168,23 @@ function runMigrations() {
         database.run('CREATE INDEX IF NOT EXISTS idx_db_query_history_executed ON db_query_history(executed_at)');
       },
     },
+    {
+      // Live "Who's connected" view: grant sessions.view_active to the builtin admin role only.
+      // Custom roles opt in from the Roles page.
+      version: 25,
+      run: (database: Database) => {
+        const row = database.exec(`SELECT permissions_json FROM roles WHERE id = 'admin'`);
+        if (!row.length || !row[0].values.length) return;
+        let perms: string[] = [];
+        try { perms = JSON.parse(row[0].values[0][0] as string) as string[]; } catch { return; }
+        if (perms.includes('sessions.view_active')) return;
+        perms.push('sessions.view_active');
+        database.run(
+          `UPDATE roles SET permissions_json = ?, updated_at = datetime('now') WHERE id = 'admin'`,
+          [JSON.stringify(perms)],
+        );
+      },
+    },
   ];
 
   // Several migrations (v5, v13, v14, v18, v24) rebuild a table via CREATE-new/

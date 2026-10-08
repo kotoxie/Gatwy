@@ -60,7 +60,7 @@ describe('migration upgrade path', () => {
     const resourceSharesAfter = after.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='resource_shares'");
     assert.equal(resourceSharesAfter.length, 1, 'resource_shares table must exist after upgrading from v21');
     const maxAfter = after.exec('SELECT MAX(version) as v FROM schema_version')[0]!.values[0]![0];
-    assert.equal(maxAfter, 24);
+    assert.equal(maxAfter, 25);
   });
 
   it('migrates real connection_shares and group_shares rows into resource_shares from a v22 database', () => {
@@ -114,7 +114,7 @@ describe('migration upgrade path', () => {
     assert.equal(oldTables.length, 0, 'connection_shares and group_shares must not survive past v23');
 
     const maxAfter = after.exec('SELECT MAX(version) as v FROM schema_version')[0]!.values[0]![0];
-    assert.equal(maxAfter, 24);
+    assert.equal(maxAfter, 25);
   });
 
   it('applies a lower-numbered migration that is missing even when a higher one is already applied', () => {
@@ -127,7 +127,7 @@ describe('migration upgrade path', () => {
     db.run('DELETE FROM schema_version WHERE version = 22');
 
     const maxBefore = db.exec('SELECT MAX(version) as v FROM schema_version')[0]!.values[0]![0];
-    assert.equal(maxBefore, 24, 'precondition: a higher version is already applied');
+    assert.equal(maxBefore, 25, 'precondition: a higher version is already applied');
     assert.equal(db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='group_shares'").length, 0);
 
     restoreDbFromBytes(Buffer.from(db.export()));
@@ -327,5 +327,44 @@ describe('migration upgrade path', () => {
     assert.equal(count(`SELECT COUNT(*) FROM rdp_events WHERE session_id = 's-v24-upgrade'`), 0, 'rdp_events must still cascade off the rebuilt sessions table');
     migrated.run(`DELETE FROM file_sessions WHERE id = 'fs-v24-upgrade'`);
     assert.equal(count(`SELECT COUNT(*) FROM file_session_events WHERE session_id = 'fs-v24-upgrade'`), 0, 'file_session_events must still cascade off the rebuilt file_sessions table');
+  });
+
+  describe('v25 sessions.view_active grant', () => {
+    const PERM = 'sessions.view_active';
+    const readPerms = (roleId: string): string[] => {
+      const res = getDb().exec(`SELECT permissions_json FROM roles WHERE id = '${roleId}'`);
+      return JSON.parse(res[0]!.values[0]![0] as string) as string[];
+    };
+    // Rewind to v24 with the given admin permission set, then re-run migrations for real.
+    const rewindToV24 = (adminPerms: string[]) => {
+      const db = getDb();
+      db.run(`UPDATE roles SET permissions_json = ? WHERE id = 'admin'`, [JSON.stringify(adminPerms)]);
+      db.run(`UPDATE roles SET permissions_json = ? WHERE id = 'user'`, [JSON.stringify(readPerms('user').filter((p) => p !== PERM))]);
+      db.run('DELETE FROM schema_version WHERE version > 24');
+      restoreDbFromBytes(Buffer.from(db.export()));
+    };
+
+    it('grants sessions.view_active to builtin admin exactly once and not to builtin user when upgrading from v24', () => {
+      const adminBefore = readPerms('admin').filter((p) => p !== PERM);
+      rewindToV24(adminBefore);
+
+      const maxAfter = getDb().exec('SELECT MAX(version) as v FROM schema_version')[0]!.values[0]![0];
+      assert.equal(maxAfter, 25);
+
+      const admin = readPerms('admin');
+      assert.equal(admin.filter((p) => p === PERM).length, 1, 'admin must have the permission exactly once');
+      assert.equal(admin.length, adminBefore.length + 1, 'no other admin permission may be added or removed');
+      assert.ok(!readPerms('user').includes(PERM), 'builtin user role must not get the permission');
+    });
+
+    it('does not duplicate sessions.view_active when admin already has it', () => {
+      const adminWith = [...readPerms('admin').filter((p) => p !== PERM), PERM];
+      rewindToV24(adminWith);
+
+      const admin = readPerms('admin');
+      assert.equal(admin.filter((p) => p === PERM).length, 1);
+      assert.deepEqual(admin, adminWith, 'admin permissions must be left untouched');
+      assert.ok(!readPerms('user').includes(PERM));
+    });
   });
 });

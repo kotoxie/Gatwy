@@ -10,6 +10,7 @@ import { config } from '../config.js';
 import { decryptRecording, encryptRecordingFileInPlace, openRdpRecordingFile, type RdpRecordingWriter } from '../services/encryption.js';
 import { resolveClientIp } from '../services/ip.js';
 import { connectionAccessWhere } from '../services/permissions.js';
+import { listActiveSessions } from '../ws/activeSessions.js';
 
 const router = Router();
 router.use(authRequired);
@@ -29,6 +30,32 @@ interface SessionRow {
   connection_name: string | null;
   username: string | null;
 }
+
+// GET /active — live proxied sessions across all users (sessions.view_active, admin-only by default).
+// Registered before the '/:id/...' routes; those all need a second path segment, so no clash.
+router.get('/active', requirePermission('sessions.view_active'), (_req: Request, res: Response) => {
+  const live = listActiveSessions();
+  const names = new Map<string, string>();
+  const ids = [...new Set(live.map((s) => s.userId))];
+  if (ids.length) {
+    const rows = queryAll<{ id: string; username: string }>(
+      `SELECT id, username FROM users WHERE id IN (${ids.map(() => '?').join(',')})`, ids);
+    for (const r of rows) names.set(r.id, r.username);
+  }
+  const now = Date.now();
+  res.json({
+    sessions: live.map((s) => ({
+      id: s.id,
+      userId: s.userId,
+      username: names.get(s.userId) ?? null,
+      protocol: s.protocol,
+      connectionName: s.connectionName,
+      status: s.status,
+      startedAt: new Date(s.startedAt).toISOString(),
+      durationMs: now - s.startedAt,
+    })),
+  });
+});
 
 // GET / — list sessions (view_any sees all, otherwise own only)
 router.get('/', (req: Request, res: Response) => {

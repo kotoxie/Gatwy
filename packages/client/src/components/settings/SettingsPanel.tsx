@@ -10,6 +10,7 @@ import { UsersSettings } from './UsersSettings';
 import { AuditTrail } from './AuditTrail';
 import { GlobalSettings } from './GlobalSettings';
 import { SessionsHistory } from './SessionsHistory';
+import { ActiveSessions } from './ActiveSessions';
 import { AuthProvidersSettings } from './AuthProvidersSettings';
 import { BackupSettings } from './BackupSettings';
 import { RolesSettings } from './RolesSettings';
@@ -22,7 +23,7 @@ interface SettingsPanelProps {
   initialSection?: string;
 }
 
-type Section = 'profile' | 'general' | 'ssh-prefs' | 'credentials' | 'security' | 'users' | 'audit' | 'global' | 'sessions' | 'authentication' | 'backup' | 'roles' | 'notifications';
+type Section = 'profile' | 'general' | 'ssh-prefs' | 'credentials' | 'security' | 'users' | 'audit' | 'global' | 'sessions' | 'authentication' | 'backup' | 'roles' | 'notifications' | 'active-sessions';
 
 interface NavItem {
   id: Section;
@@ -176,6 +177,7 @@ const ADMIN_NAV: NavItem[] = [
   { id: 'security', label: 'Security', icon: <ShieldIcon />, permission: 'settings.security' },
   { id: 'authentication', label: 'Authentication', icon: <KeyIcon />, permission: 'settings.auth_providers' },
   { id: 'sessions', label: 'Recordings', icon: <HistoryIcon />, permission: ['sessions.view_any', 'sessions.view_own'] },
+  { id: 'active-sessions', label: 'Connected', icon: <UsersIcon />, permission: 'sessions.view_active' },
   { id: 'audit', label: 'Audit', icon: <ListIcon />, permission: ['audit.view_any', 'audit.view_own'] },
   { id: 'users', label: 'Users', icon: <UsersIcon />, permission: 'users.manage' },
   { id: 'roles', label: 'Roles', icon: <RolesIcon />, permission: 'roles.manage' },
@@ -200,6 +202,7 @@ const NAV_LABEL_MAP: Record<Section, string> = {
   'authentication': 'Authentication',
   'backup': 'Backup & Restore',
   'roles': 'Roles',
+  'active-sessions': "Who's connected",
 };
 
 export function SettingsPanel({ isOpen, onClose, initialSection }: SettingsPanelProps) {
@@ -340,6 +343,7 @@ export function SettingsPanel({ isOpen, onClose, initialSection }: SettingsPanel
             {activeSection === 'audit' && (hasPerm('audit.view_any') || hasPerm('audit.view_own')) && <AuditTrail />}
             {activeSection === 'global' && hasPerm('settings.manage') && <GlobalSettings />}
             {activeSection === 'sessions' && (hasPerm('sessions.view_any') || hasPerm('sessions.view_own')) && <SessionsHistory />}
+            {activeSection === 'active-sessions' && hasPerm('sessions.view_active') && <ActiveSessions />}
             {activeSection === 'backup' && hasPerm('settings.backup') && <BackupSettings />}
             {activeSection === 'roles' && hasPerm('roles.manage') && <RolesSettings />}
             {activeSection === 'notifications' && hasPerm('settings.notifications') && <NotificationsSettings />}

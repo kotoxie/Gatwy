@@ -5,7 +5,7 @@ export const ALL_PERMISSIONS = [
   'connections.create', 'connections.edit_own', 'connections.delete_own',
   'connections.edit_any', 'connections.delete_any', 'connections.share', 'connections.import_export',
   'credentials.share', 'credentials.use_shared',
-  'sessions.view_own', 'sessions.view_any', 'sessions.delete',
+  'sessions.view_own', 'sessions.view_any', 'sessions.delete', 'sessions.view_active',
   'audit.view_own', 'audit.view_any',
   'users.manage', 'settings.manage', 'settings.auth_providers', 'settings.security', 'settings.backup', 'settings.notifications',
   'roles.manage',
@@ -54,6 +54,7 @@ export const PERMISSION_GROUPS: Record<string, { label: string; permissions: { k
       { key: 'sessions.view_own', label: 'View own recordings' },
       { key: 'sessions.view_any', label: 'View all recordings' },
       { key: 'sessions.delete', label: 'Delete / purge recordings' },
+      { key: 'sessions.view_active', label: "View who's connected (live sessions)" },
     ],
   },
   audit: {

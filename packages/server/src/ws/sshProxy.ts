@@ -9,6 +9,7 @@ import crypto from 'crypto';
 import { hashToken, isSessionRevoked } from '../services/loginSession.js';
 import { registerWs, unregisterWs } from './wsRegistry.js';
 import { acquireConnection, releaseConnection } from './connectionLimits.js';
+import { addActiveSession, removeActiveSession, setActiveSessionStatus } from './activeSessions.js';
 import { queryOne, execute } from '../db/helpers.js';
 import { redeemWsTicket } from '../services/wsTicket.js';
 import { userHasPermission, wsCanAccess } from '../services/permissions.js';
@@ -63,6 +64,7 @@ function teardownSession(
   // disconnect is audited twice and the user's slot is released twice.
   if (session.tornDown) return;
   session.tornDown = true;
+  removeActiveSession(sessionDbId);
   if (session.castFile) { try { session.castFile.end(); } catch { /**/ } session.castFile = null; }
   if (session.cmdTracker) { try { session.cmdTracker.flush(); } catch { /**/ } session.cmdTracker = null; }
   session.tunnelServers.forEach((s) => { try { s.close(); } catch { /**/ } });
@@ -109,6 +111,7 @@ function wireClientWs(
     const s = getSession(clientSessionId);
     if (s) {
       s.ws = null;
+      setActiveSessionStatus(sessionDbId, 'grace');
       startGrace(clientSessionId, () =>
         teardownSession(clientSessionId, s, userId, host, port, connectionId, sessionDbId, clientIp));
     }
@@ -152,6 +155,7 @@ export function setupSshProxy(server: https.Server, basePath = ''): void {
     if (cached && cached.userId === userId && cached.connectionId === connectionId && cached.tokenHash === tokenHash) {
       clearGrace(clientSessionId);
       cached.ws = ws;
+      setActiveSessionStatus(cached.sessionDbId, 'connected');
       ws.send(JSON.stringify({ type: 'status', message: 'Reattached' }));
       // Replay buffered output so the terminal catches up
       for (const chunk of cached.outputBuffer) {
@@ -324,6 +328,10 @@ export function setupSshProxy(server: https.Server, basePath = ''): void {
         };
         storeSession(clientSessionId, session);
         sessionStored = true;
+        addActiveSession({
+          id: sessionDbId, userId, connectionId, connectionName: conn.name,
+          protocol: 'ssh',
+        });
         shellStream.setWindow(rows, cols, 0, 0);
 
         shellStream.on('data', (data: Buffer) => {
