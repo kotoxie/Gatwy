@@ -6,10 +6,13 @@ import {
   removeActiveSession,
   setActiveSessionStatus,
   listActiveSessions,
+  getActiveSession,
+  endActiveSession,
 } from '../src/ws/activeSessions.js';
 
 const base = {
   userId: 'u1', connectionId: 'c1', connectionName: 'router', protocol: 'ssh' as const,
+  end: () => {},
 };
 
 describe('activeSessions registry', () => {
@@ -48,4 +51,26 @@ describe('activeSessions registry', () => {
     addActiveSession({ ...base, id: 'b', protocol: 'rdp' });
     assert.deepEqual(listActiveSessions().map((s) => s.id), ['a', 'b']);
   });
+  it('endActiveSession runs end() once, removes the entry and reports false afterwards', () => {
+    let ended = 0;
+    addActiveSession({ ...base, id: 's1', end: () => { ended++; } });
+    assert.ok(getActiveSession('s1'));
+    assert.equal(endActiveSession('s1'), true);
+    assert.equal(endActiveSession('s1'), false);
+    assert.equal(ended, 1);
+    assert.equal(getActiveSession('s1'), undefined);
+    assert.equal(listActiveSessions().length, 0);
+  });
+
+  it('endActiveSession removes the entry even when end() throws, and does not touch other sessions', () => {
+    addActiveSession({ ...base, id: 'bad', end: () => { throw new Error('boom'); } });
+    addActiveSession({ ...base, id: 'other' });
+    assert.equal(endActiveSession('bad'), true);
+    assert.deepEqual(listActiveSessions().map((x) => x.id), ['other']);
+  });
+
+  it('endActiveSession returns false for an unknown id', () => {
+    assert.equal(endActiveSession('nope'), false);
+  });
+
 });

@@ -6,7 +6,7 @@ import type https from 'https';
 import { isSessionRevoked } from '../services/loginSession.js';
 import { registerWs, unregisterWs } from './wsRegistry.js';
 import { acquireConnection, releaseConnection } from './connectionLimits.js';
-import { addActiveSession, removeActiveSession } from './activeSessions.js';
+import { addActiveSession, removeActiveSession, ADMIN_DISCONNECT_CODE, ADMIN_DISCONNECT_REASON } from './activeSessions.js';
 import { redeemWsTicket } from '../services/wsTicket.js';
 import { userHasPermission, wsCanAccess } from '../services/permissions.js';
 import { applyCredential } from '../services/credentials.js';
@@ -312,6 +312,7 @@ export function setupRdpProxy(server: https.Server, basePath = ''): void {
     addActiveSession({
       id: sessionId, userId, connectionId, connectionName: conn.name,
       protocol: 'rdp',
+      end: () => { if (ws.readyState === WebSocket.OPEN) ws.close(ADMIN_DISCONNECT_CODE, ADMIN_DISCONNECT_REASON); },
     });
     ws.once('close', () => removeActiveSession(sessionId));
 

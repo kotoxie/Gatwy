@@ -5,7 +5,7 @@ import { queryOne } from '../db/helpers.js';
 import { isSessionRevoked } from '../services/loginSession.js';
 import { registerWs, unregisterWs } from './wsRegistry.js';
 import { acquireConnection, releaseConnection } from './connectionLimits.js';
-import { addActiveSession, removeActiveSession } from './activeSessions.js';
+import { addActiveSession, removeActiveSession, ADMIN_DISCONNECT_CODE, ADMIN_DISCONNECT_REASON } from './activeSessions.js';
 import { redeemWsTicket } from '../services/wsTicket.js';
 import { userHasPermission, wsCanAccess } from '../services/permissions.js';
 import { logAudit } from '../services/audit.js';
@@ -66,6 +66,7 @@ export function setupVncProxy(server: Server, basePath = ''): void {
       addActiveSession({
         id: sessionId, userId, connectionId, connectionName: conn.name,
         protocol: 'vnc',
+        end: () => { if (ws.readyState === 1) ws.close(ADMIN_DISCONNECT_CODE, ADMIN_DISCONNECT_REASON); },
       });
 
       function teardown() {

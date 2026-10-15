@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useAuth } from '../../hooks/useAuth';
 
 interface ActiveSessionRow {
   id: string;
@@ -21,6 +22,8 @@ function formatDuration(ms: number): string {
 }
 
 export function ActiveSessions() {
+  const { user } = useAuth();
+  const canDisconnect = !!user?.permissions.includes('sessions.disconnect');
   const [sessions, setSessions] = useState<ActiveSessionRow[]>([]);
   const [fetchedAt, setFetchedAt] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
@@ -28,6 +31,10 @@ export function ActiveSessions() {
   const [error, setError] = useState('');
   // Set once polling gave up (401/403): the table is cleared and the refresh hint hidden.
   const [stopped, setStopped] = useState(false);
+  // Disconnect is a two-step action: the first click arms the row, the second one confirms it.
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -64,6 +71,22 @@ export function ActiveSessions() {
     return () => { cancelled = true; clearInterval(timer); clearInterval(tick); };
   }, []);
 
+  async function disconnect(id: string) {
+    setBusyId(id);
+    setActionError('');
+    try {
+      const res = await fetch(`/api/v1/sessions/active/${encodeURIComponent(id)}/disconnect`, { method: 'POST', credentials: 'include' });
+      const data = await res.json().catch(() => ({})) as { error?: string };
+      // 404: the session ended on its own in the meantime, so it only needs to leave the table.
+      if (!res.ok && res.status !== 404) throw new Error(data.error || `Server error (${res.status})`);
+      setSessions((prev) => prev.filter((x) => x.id !== id));
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Failed to disconnect the session');
+    }
+    setBusyId(null);
+    setConfirmingId(null);
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -72,6 +95,7 @@ export function ActiveSessions() {
       </div>
 
       {error && <p className="text-sm text-red-500">{error}</p>}
+      {actionError && <p className="text-sm text-red-500">{actionError}</p>}
       {loading && <p className="text-text-secondary text-sm">Loading active sessions...</p>}
       {!loading && !error && !stopped && sessions.length === 0 && (
         <p className="text-text-secondary text-sm">No active sessions.</p>
@@ -90,7 +114,8 @@ export function ActiveSessions() {
                   <th className="pb-2 pr-4 font-medium">Connection</th>
                   <th className="pb-2 pr-4 font-medium">Protocol</th>
                   <th className="pb-2 pr-4 font-medium">Duration</th>
-                  <th className="pb-2 font-medium">Status</th>
+                  <th className="pb-2 pr-4 font-medium">Status</th>
+                  {canDisconnect && <th className="pb-2 font-medium">Action</th>}
                 </tr>
               </thead>
               <tbody>
@@ -104,7 +129,7 @@ export function ActiveSessions() {
                       </span>
                     </td>
                     <td className="py-2 pr-4 text-xs text-text-secondary">{formatDuration(s.durationMs + Math.max(0, now - fetchedAt))}</td>
-                    <td className="py-2">
+                    <td className="py-2 pr-4">
                       {s.status === 'connected' ? (
                         <span className="px-1.5 py-0.5 rounded text-xs bg-accent/10 text-accent border border-accent/20">Connected</span>
                       ) : (
@@ -116,6 +141,36 @@ export function ActiveSessions() {
                         </span>
                       )}
                     </td>
+                    {canDisconnect && (
+                      <td className="py-2">
+                        {confirmingId === s.id ? (
+                          <span className="flex items-center gap-1">
+                            <button
+                              onClick={() => void disconnect(s.id)}
+                              disabled={busyId === s.id}
+                              className="px-2 py-1 text-xs bg-red-500/10 text-red-500 rounded hover:bg-red-500/20 border border-red-500/30 disabled:opacity-50"
+                            >
+                              {busyId === s.id ? '…' : 'Confirm'}
+                            </button>
+                            <button
+                              onClick={() => setConfirmingId(null)}
+                              disabled={busyId === s.id}
+                              className="px-2 py-1 text-xs border border-border text-text-secondary rounded hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
+                            >
+                              Cancel
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => { setActionError(''); setConfirmingId(s.id); }}
+                            className="px-2 py-1 text-xs border border-border text-text-secondary rounded hover:bg-surface-hover hover:text-text-primary"
+                            title="End this session and close the user's connection"
+                          >
+                            Disconnect
+                          </button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

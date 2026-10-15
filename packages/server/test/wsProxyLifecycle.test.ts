@@ -43,7 +43,7 @@ const { setupTelnetProxy } = await import('../src/ws/telnetProxy.js');
 const { setupRdpProxy } = await import('../src/ws/rdpProxy.js');
 const { setupVncProxy } = await import('../src/ws/vncProxy.js');
 const { getSession } = await import('../src/ws/sshSessionCache.js');
-const { listActiveSessions } = await import('../src/ws/activeSessions.js');
+const { listActiveSessions, endActiveSession } = await import('../src/ws/activeSessions.js');
 
 const LIMIT = 2;
 
@@ -58,7 +58,7 @@ const realCreateConnection = net.createConnection;
 let deadPort: number;
 const clients: Client[] = [];
 
-interface Client { ws: WebSocket; msgs: string[]; closed: Promise<number>; code: () => number | null }
+interface Client { ws: WebSocket; msgs: string[]; closed: Promise<number>; code: () => number | null; reason: () => string }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 // Captured before any test mocks setTimeout: waits in real time while the mock is on.
@@ -150,12 +150,13 @@ function open(pathAndQuery: string, user: string, token = `token-${user}`): Clie
   const ws = new WebSocket(`ws://127.0.0.1:${proxyPort}${pathAndQuery}${sep}ticket=${ticket}`);
   const msgs: string[] = [];
   let code: number | null = null;
+  let reason = '';
   ws.on('message', (d: Buffer) => msgs.push(d.toString()));
   const closed = new Promise<number>((res) => {
-    ws.on('close', (c: number) => { code = c; res(c); });
+    ws.on('close', (c: number, r: Buffer) => { code = c; reason = r.toString(); res(c); });
     ws.on('error', () => { /* 'close' follows */ });
   });
-  const client = { ws, msgs, closed, code: () => code };
+  const client = { ws, msgs, closed, code: () => code, reason: () => reason };
   clients.push(client);
   return client;
 }
@@ -404,6 +405,104 @@ describe('explicit close from the browser', () => {
     assert.equal(liveOf('u-tel-close').length, 0, 'the session must not be listed as reconnecting');
     await sleep(300);
     assert.equal(disconnectRows('session.telnet.disconnect', 'tel-close').length, 1);
+  });
+});
+
+describe('an administrator ending a live session', () => {
+  const ADMIN_CODE = 4010;
+  const live = (connectionId: string) => listActiveSessions().find((x) => x.connectionId === connectionId);
+
+  it('SSH: closes the browser with 4010, tears the session down once and frees the slot', async () => {
+    addUser('u-ssh-end');
+    addConn('ssh-end', 'u-ssh-end', 'ssh', sshUpstream.port);
+    const c = open(`/ws/ssh?connectionId=ssh-end&sessionId=${sid()}`, 'u-ssh-end');
+    const cacheId = new URL(c.ws.url).searchParams.get('sessionId')!;
+    await until(() => !!getSession(cacheId) && !!live('ssh-end'), 5000);
+    assert.ok(live('ssh-end'), 'the session is registered once it is cached');
+
+    assert.equal(endActiveSession(live('ssh-end')!.id), true);
+    assert.equal(await c.closed, ADMIN_CODE);
+    assert.equal(c.reason(), 'Disconnected by an administrator');
+    assert.equal(getSession(cacheId), undefined, 'the cached session is gone, so the user cannot reattach');
+    assert.equal(live('ssh-end'), undefined);
+    await sleep(500); // a second teardown, if any, comes from the shell 'close' event
+    assert.equal(disconnectRows('session.ssh.disconnect', 'ssh-end').length, 1, 'one disconnect audit event');
+
+    // The user had one slot (LIMIT is 2): after releasing it exactly twice more sessions must fit.
+    const a = open(`/ws/ssh?connectionId=ssh-end&sessionId=${sid()}`, 'u-ssh-end');
+    const b = open(`/ws/ssh?connectionId=ssh-end&sessionId=${sid()}`, 'u-ssh-end');
+    await until(() => isConnected(a) && isConnected(b), 5000);
+    assert.ok(isConnected(a) && isConnected(b), 'the slot of the ended session was released');
+  });
+
+  it('SSH: ends a session waiting in its grace period and cancels its grace timer', async () => {
+    addUser('u-ssh-end-grace');
+    addConn('ssh-end-grace', 'u-ssh-end-grace', 'ssh', sshUpstream.port);
+    const c = open(`/ws/ssh?connectionId=ssh-end-grace&sessionId=${sid()}`, 'u-ssh-end-grace');
+    const cacheId = new URL(c.ws.url).searchParams.get('sessionId')!;
+    await until(() => !!getSession(cacheId) && !!live('ssh-end-grace'), 5000);
+
+    mock.timers.enable({ apis: ['setTimeout'] });
+    c.ws.close();
+    for (let i = 0; i < 20000 && !getSession(cacheId)?.timer; i++) await new Promise((r) => setImmediate(r));
+    assert.ok(getSession(cacheId)?.timer, 'the grace timer is running');
+    assert.equal(live('ssh-end-grace')?.status, 'grace');
+    const cached = getSession(cacheId)!;
+
+    assert.equal(endActiveSession(live('ssh-end-grace')!.id), true);
+    assert.equal(getSession(cacheId), undefined);
+    assert.equal(cached.timer, null, 'the grace timer is cancelled, not left to fire two minutes later');
+    mock.timers.tick(120_000);
+    mock.timers.reset();
+    await sleep(500);
+    assert.equal(disconnectRows('session.ssh.disconnect', 'ssh-end-grace').length, 1, 'one disconnect audit event, not two');
+  });
+
+  it('Telnet: closes the browser with 4010, tears the session down once and frees the slot', async () => {
+    addUser('u-tel-end');
+    addConn('tel-end', 'u-tel-end', 'telnet', tcpUpstream.port);
+    const c = open(`/ws/telnet?connectionId=tel-end&sessionId=${sid()}`, 'u-tel-end');
+    await until(() => !!live('tel-end'), 5000);
+    assert.ok(live('tel-end'));
+
+    assert.equal(endActiveSession(live('tel-end')!.id), true);
+    assert.equal(await c.closed, ADMIN_CODE);
+    assert.equal(c.reason(), 'Disconnected by an administrator');
+    assert.equal(live('tel-end'), undefined);
+    await sleep(500); // a second teardown, if any, comes from the socket 'close' event
+    assert.equal(disconnectRows('session.telnet.disconnect', 'tel-end').length, 1, 'one disconnect audit event');
+
+    const a = open(`/ws/telnet?connectionId=tel-end&sessionId=${sid()}`, 'u-tel-end');
+    const b = open(`/ws/telnet?connectionId=tel-end&sessionId=${sid()}`, 'u-tel-end');
+    await until(() => isConnected(a) && isConnected(b), 5000);
+    assert.ok(isConnected(a) && isConnected(b), 'the slot of the ended session was released');
+  });
+
+  it('RDP: closes the browser socket with 4010 and the registry entry goes away', async () => {
+    addUser('u-rdp-end');
+    addConn('rdp-end', 'u-rdp-end', 'rdp', tcpUpstream.port);
+    const c = open('/ws/rdp-raw?connectionId=rdp-end', 'u-rdp-end');
+    await until(() => !!live('rdp-end'), 5000);
+    assert.ok(live('rdp-end'));
+
+    assert.equal(endActiveSession(live('rdp-end')!.id), true);
+    assert.equal(await c.closed, ADMIN_CODE);
+    assert.equal(live('rdp-end'), undefined);
+  });
+
+  it('VNC: closes the browser socket with 4010 and drops the upstream connection', async () => {
+    addUser('u-vnc-end');
+    addConn('vnc-end', 'u-vnc-end', 'vnc', tcpUpstream.port);
+    const open0 = tcpUpstream.state.open;
+    const c = open('/ws/vnc/vnc-end', 'u-vnc-end');
+    await until(() => !!live('vnc-end') && tcpUpstream.state.open > open0, 5000);
+    assert.ok(live('vnc-end'));
+
+    assert.equal(endActiveSession(live('vnc-end')!.id), true);
+    assert.equal(await c.closed, ADMIN_CODE);
+    await until(() => tcpUpstream.state.open === open0, 3000);
+    assert.equal(tcpUpstream.state.open, open0, 'the upstream connection was closed');
+    assert.equal(live('vnc-end'), undefined);
   });
 });
 

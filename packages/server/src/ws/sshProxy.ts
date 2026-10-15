@@ -9,7 +9,9 @@ import crypto from 'crypto';
 import { hashToken, isSessionRevoked } from '../services/loginSession.js';
 import { registerWs, unregisterWs } from './wsRegistry.js';
 import { acquireConnection, releaseConnection } from './connectionLimits.js';
-import { addActiveSession, removeActiveSession, setActiveSessionStatus } from './activeSessions.js';
+import {
+  addActiveSession, removeActiveSession, setActiveSessionStatus, ADMIN_DISCONNECT_CODE, ADMIN_DISCONNECT_REASON,
+} from './activeSessions.js';
 import { queryOne, execute } from '../db/helpers.js';
 import { redeemWsTicket } from '../services/wsTicket.js';
 import { userHasPermission, wsCanAccess } from '../services/permissions.js';
@@ -336,6 +338,13 @@ export function setupSshProxy(server: https.Server, basePath = ''): void {
         addActiveSession({
           id: sessionDbId, userId, connectionId, connectionName: conn.name,
           protocol: 'ssh',
+          end: () => {
+            // A session waiting in its grace period has no socket and a timer that would tear it down later.
+            if (session.timer) { clearTimeout(session.timer); session.timer = null; }
+            const live = session.ws;
+            teardownSession(clientSessionId, session, userId, conn.host, conn.port, connectionId, sessionDbId, clientIp);
+            if (live?.readyState === WebSocket.OPEN) live.close(ADMIN_DISCONNECT_CODE, ADMIN_DISCONNECT_REASON);
+          },
         });
         shellStream.setWindow(rows, cols, 0, 0);
 

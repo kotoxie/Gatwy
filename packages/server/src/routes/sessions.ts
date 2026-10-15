@@ -10,7 +10,7 @@ import { config } from '../config.js';
 import { decryptRecording, encryptRecordingFileInPlace, openRdpRecordingFile, type RdpRecordingWriter } from '../services/encryption.js';
 import { resolveClientIp } from '../services/ip.js';
 import { connectionAccessWhere } from '../services/permissions.js';
-import { listActiveSessions } from '../ws/activeSessions.js';
+import { listActiveSessions, getActiveSession, endActiveSession } from '../ws/activeSessions.js';
 
 const router = Router();
 router.use(authRequired);
@@ -55,6 +55,23 @@ router.get('/active', requirePermission('sessions.view_active'), (_req: Request,
       durationMs: now - s.startedAt,
     })),
   });
+});
+
+// POST /active/:id/disconnect — end a live session (sessions.disconnect, admin-only by default).
+// The audit event is written before the session is ended so it is recorded even if teardown fails.
+router.post('/active/:id/disconnect', requirePermission('sessions.disconnect'), (req: Request, res: Response) => {
+  const id = String(req.params.id);
+  const target = getActiveSession(id);
+  if (!target) { res.status(404).json({ error: 'Session not found or already ended' }); return; }
+  logAudit({
+    userId: req.user!.userId,
+    eventType: 'session.disconnect.forced',
+    target: target.connectionName,
+    details: { sessionId: id, connectionId: target.connectionId, protocol: target.protocol, targetUserId: target.userId },
+    ipAddress: resolveClientIp(req),
+  });
+  endActiveSession(id);
+  res.json({ ok: true });
 });
 
 // GET / — list sessions (view_any sees all, otherwise own only)

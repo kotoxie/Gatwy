@@ -92,6 +92,7 @@ const EVENT_GROUPS: { label: string; events: { value: string; label: string }[] 
       { value: 'session.telnet.disconnect', label: 'Telnet session disconnected' },
       { value: 'session.vnc.connect', label: 'VNC session connected' },
       { value: 'session.vnc.disconnect', label: 'VNC session disconnected' },
+      { value: 'session.disconnect.forced', label: 'Session disconnected by an administrator' },
       { value: 'session.moonlight.connect', label: 'Moonlight session connected' },
       { value: 'session.moonlight.disconnect', label: 'Moonlight session disconnected' },
       { value: 'session.moonlight.pair', label: 'Moonlight pairing event' },

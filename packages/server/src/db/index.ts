@@ -1207,6 +1207,23 @@ function runMigrations() {
         }
       },
     },
+    {
+      // Disconnect button on the live view: grant sessions.disconnect to the builtin admin role only.
+      // Custom roles opt in from the Roles page.
+      version: 27,
+      run: (database: Database) => {
+        const row = database.exec(`SELECT permissions_json FROM roles WHERE id = 'admin'`);
+        if (!row.length || !row[0].values.length) return;
+        let perms: string[] = [];
+        try { perms = JSON.parse(row[0].values[0][0] as string) as string[]; } catch { return; }
+        if (perms.includes('sessions.disconnect')) return;
+        perms.push('sessions.disconnect');
+        database.run(
+          `UPDATE roles SET permissions_json = ?, updated_at = datetime('now') WHERE id = 'admin'`,
+          [JSON.stringify(perms)],
+        );
+      },
+    },
   ];
 
   // Several migrations (v5, v13, v14, v18, v24) rebuild a table via CREATE-new/
