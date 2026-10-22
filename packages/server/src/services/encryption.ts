@@ -141,12 +141,13 @@ export interface RdpRecordingWriter {
  * Opens a new encrypted recording file and returns a writer that encrypts
  * each chunk with AES-256-CTR (continuous keystream across all chunks).
  * Writes the magic header + IV synchronously on creation.
+ * Throws if the file already exists: a recording is never reopened, since that would truncate it.
  */
 export function openRdpRecordingFile(filePath: string): RdpRecordingWriter {
   const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv(STREAM_ALGORITHM, encryptionKey, iv);
   const header = Buffer.concat([REC_MAGIC, Buffer.from([REC_VERSION]), iv]);
-  fs.writeFileSync(filePath, header);
+  fs.writeFileSync(filePath, header, { flag: 'wx' });
   return {
     writeChunk(data: Buffer) {
       fs.appendFileSync(filePath, cipher.update(data));

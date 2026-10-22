@@ -26,6 +26,13 @@ export function logFileSessionEvent(params: {
       `INSERT OR IGNORE INTO file_sessions (id, user_id, connection_id, protocol, username, connection_name) VALUES (?, ?, ?, ?, ?, ?)`,
       [sessionId, params.userId, params.connectionId, params.protocol, userRow?.username ?? null, connRow?.name ?? null],
     );
+    // The id comes from a client header, and sessions.view_any holders can list every id. Only the
+    // session that created the row may add events to it or move its end time.
+    const owner = queryOne<{ user_id: string; connection_id: string; protocol: string }>(
+      'SELECT user_id, connection_id, protocol FROM file_sessions WHERE id = ?',
+      [sessionId],
+    );
+    if (!owner || owner.user_id !== params.userId || owner.connection_id !== params.connectionId || owner.protocol !== params.protocol) return;
     execute(
       `UPDATE file_sessions SET ended_at = datetime('now') WHERE id = ?`,
       [sessionId],
