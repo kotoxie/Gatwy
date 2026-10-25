@@ -10,6 +10,7 @@ import { config } from '../config.js';
 import { decryptRecording, encryptRecordingFileInPlace, openRdpRecordingFile, type RdpRecordingWriter } from '../services/encryption.js';
 import { resolveClientIp } from '../services/ip.js';
 import { recordingSessionGuard } from '../middleware/preBodyGuards.js';
+import { sessionsReadLimiter, sessionsActionLimiter, recordingChunkLimiter } from '../middleware/rateLimit.js';
 import { connectionAccessWhere } from '../services/permissions.js';
 import { listActiveSessions, getActiveSession, endActiveSession, isTargetInUseByOthers, targetKey } from '../ws/activeSessions.js';
 
@@ -60,7 +61,7 @@ router.get('/active', requirePermission('sessions.view_active'), (_req: Request,
 
 // GET /rdp-in-use?connectionId=... — is someone else already connected to this RDP host? Advisory only:
 // it answers a yes or no for a connection the caller can open, and never says who or how many.
-router.get('/rdp-in-use', requirePermission('protocols.rdp'), (req: Request, res: Response) => {
+router.get('/rdp-in-use', sessionsReadLimiter, requirePermission('protocols.rdp'), (req: Request, res: Response) => {
   const connectionId = typeof req.query.connectionId === 'string' ? req.query.connectionId : '';
   if (!connectionId) { res.status(400).json({ error: 'connectionId required' }); return; }
   const access = connectionAccessWhere('connections', req.user!.userId, req.user!.role);
@@ -74,7 +75,7 @@ router.get('/rdp-in-use', requirePermission('protocols.rdp'), (req: Request, res
 
 // POST /active/:id/disconnect — end a live session (sessions.disconnect, admin-only by default).
 // The audit event is written before the session is ended so it is recorded even if teardown fails.
-router.post('/active/:id/disconnect', requirePermission('sessions.disconnect'), (req: Request, res: Response) => {
+router.post('/active/:id/disconnect', sessionsActionLimiter, requirePermission('sessions.disconnect'), (req: Request, res: Response) => {
   const id = String(req.params.id);
   const target = getActiveSession(id);
   if (!target) { res.status(404).json({ error: 'Session not found or already ended' }); return; }
@@ -295,7 +296,7 @@ router.post('/rdp-file-transfer', (req: Request, res: Response) => {
 // POST /:id/recording/chunk — append a binary WebM chunk to the recording file
 // SECURITY: express.raw() here (not at the app level) so the body is only read after
 // router.use(authRequired) and recordingSessionGuard (ownership) have run.
-router.post('/:id/recording/chunk', recordingSessionGuard, express.raw({ limit: '100mb', type: '*/*' }), (req: Request, res: Response) => {
+router.post('/:id/recording/chunk', recordingChunkLimiter, recordingSessionGuard, express.raw({ limit: '100mb', type: '*/*' }), (req: Request, res: Response) => {
   if (!Buffer.isBuffer(req.body)) { res.status(400).json({ error: 'Invalid chunk body' }); return; }
   const userId = req.user!.userId;
   const id = req.params.id as string;

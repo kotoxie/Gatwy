@@ -31,7 +31,9 @@ interface SeedOptions { protocol?: string; endedAt?: string | null; withFile?: b
 // Each test gets its own session and recording file, so one test's writes never leak into another's.
 // withFile=false leaves recording_path empty, like a recording that has not received its first chunk yet.
 function seedSession(id: string, { protocol = 'rdp', endedAt = null, withFile = true }: SeedOptions = {}): string {
-  const file = path.join(dataDir, `${id}.${protocol === 'rdp' ? 'webm' : 'cast'}`);
+  const recordingsDir = path.join(dataDir, 'recordings');
+  fs.mkdirSync(recordingsDir, { recursive: true });
+  const file = path.join(recordingsDir, `${id}.${protocol === 'rdp' ? 'webm' : 'cast'}`);
   if (withFile) fs.writeFileSync(file, ORIGINAL);
   execute(
     `INSERT INTO sessions (id, user_id, connection_id, protocol, username, connection_name, recording_path, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
