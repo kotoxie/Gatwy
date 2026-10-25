@@ -44,6 +44,6 @@ describe('Moonlight runs inside Gatwy at runtime, not a sidecar', () => {
   it('fetch helper prefers musl on Alpine including x86_64', () => {
     assert.match(fetchScript, /x86_64-unknown-linux-musl/);
     assert.match(fetchScript, /PINNED_SHA_x86_64_unknown_linux_musl=/);
-    assert.match(fetchScript, /v3\.0\.0-prerelease\.5/);
+    assert.match(fetchScript, /VERSION="\$\{2:-v3\.0\.0\}"/);
   });
 });

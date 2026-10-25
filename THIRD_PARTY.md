@@ -22,15 +22,15 @@ The SSH terminal font choices are self-hosted from the `@fontsource` packages, s
 - It is **not** vendored in this repository.
 - `scripts/fetch-moonlight-web.sh` downloads a **pinned** GitHub release and verifies a baked-in SHA-256. A mismatch or unknown target exits non-zero.
 
-Pinned release: **v3.0.0-prerelease.5**
+Pinned release: **v3.0.0**
 
 Alpine (musl) images fetch the musl assets so the binary can run in-process. glibc hosts fetch the gnu assets.
 
 | Asset | SHA-256 |
 | --- | --- |
-| `moonlight-web-x86_64-unknown-linux-musl.tar.gz` | `bda8c825db233a50e2500d5bcfd93267ce4d2adc774bd964f325967133ba5b62` |
-| `moonlight-web-x86_64-unknown-linux-gnu.tar.gz` | `a8371ae6c614d672737cf2fa7dfb61fd46627a45f5c4187480e258e4489327c2` |
-| `moonlight-web-aarch64-unknown-linux-gnu.tar.gz` | `eab9866eec4991db5884d95886cc4f3bec9695fa9e9e052cc64f19b6a72a7226` |
-| `moonlight-web-aarch64-unknown-linux-musl.tar.gz` | `3f5bb7f1b44f16beaf06f946e7dea29f3cb07834c50e18a5e6a2a1966d1e7023` |
+| `moonlight-web-x86_64-unknown-linux-musl.tar.gz` | `86b960f6295f6b8d5f166bceb7e5d97aaadc7a0562a1cf91071d66777c1beadf` |
+| `moonlight-web-x86_64-unknown-linux-gnu.tar.gz` | `6b1d679bfd545b7bb0748d02e9617a6abde02223d1957324c6489f6959acac3c` |
+| `moonlight-web-aarch64-unknown-linux-gnu.tar.gz` | `7beb0ec95e9feda042878c18ba4363f962cef44ad8dd915bf3d17d7e82b6f733` |
+| `moonlight-web-aarch64-unknown-linux-musl.tar.gz` | `7cc619bb232410ec6f35e776b8c642dafd8983ae7ccc6e80dd62586ff2074b64` |
 
 Source and license: https://github.com/MrCreativ3001/moonlight-web-stream

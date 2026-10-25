@@ -16,15 +16,15 @@
 set -eu
 
 DEST="${1:-/opt/moonlight-web}"
-VERSION="${2:-v3.0.0-prerelease.5}"
+VERSION="${2:-v3.0.0}"
 ARCH_HINT="${3:-${TARGETARCH:-}}"
 
-# GitHub release asset digests for moonlight-web-stream v3.0.0-prerelease.5
-# https://github.com/MrCreativ3001/moonlight-web-stream/releases/tag/v3.0.0-prerelease.5
-PINNED_SHA_x86_64_unknown_linux_gnu=a8371ae6c614d672737cf2fa7dfb61fd46627a45f5c4187480e258e4489327c2
-PINNED_SHA_x86_64_unknown_linux_musl=bda8c825db233a50e2500d5bcfd93267ce4d2adc774bd964f325967133ba5b62
-PINNED_SHA_aarch64_unknown_linux_gnu=eab9866eec4991db5884d95886cc4f3bec9695fa9e9e052cc64f19b6a72a7226
-PINNED_SHA_aarch64_unknown_linux_musl=3f5bb7f1b44f16beaf06f946e7dea29f3cb07834c50e18a5e6a2a1966d1e7023
+# GitHub release asset digests for moonlight-web-stream v3.0.0
+# https://github.com/MrCreativ3001/moonlight-web-stream/releases/tag/v3.0.0
+PINNED_SHA_x86_64_unknown_linux_gnu=6b1d679bfd545b7bb0748d02e9617a6abde02223d1957324c6489f6959acac3c
+PINNED_SHA_x86_64_unknown_linux_musl=86b960f6295f6b8d5f166bceb7e5d97aaadc7a0562a1cf91071d66777c1beadf
+PINNED_SHA_aarch64_unknown_linux_gnu=7beb0ec95e9feda042878c18ba4363f962cef44ad8dd915bf3d17d7e82b6f733
+PINNED_SHA_aarch64_unknown_linux_musl=7cc619bb232410ec6f35e776b8c642dafd8983ae7ccc6e80dd62586ff2074b64
 
 echo "moonlight-web-stream is licensed under GPL-3.0."
 echo "Source:  https://github.com/MrCreativ3001/moonlight-web-stream"
@@ -76,9 +76,9 @@ case "$ARCH_HINT" in
     ;;
 esac
 
-if [ "$VERSION" != "v3.0.0-prerelease.5" ]; then
+if [ "$VERSION" != "v3.0.0" ]; then
   echo "Refusing unpinned moonlight-web-stream version: $VERSION" >&2
-  echo "This script only installs v3.0.0-prerelease.5 with a baked-in SHA-256." >&2
+  echo "This script only installs v3.0.0 with a baked-in SHA-256." >&2
   exit 1
 fi
 
