@@ -314,10 +314,10 @@ router.post('/:id/recording/chunk', recordingSessionGuard, express.raw({ limit: 
   if (session.protocol !== 'rdp') { res.status(400).json({ error: 'Not an RDP session' }); return; }
   if (session.ended_at) { res.status(409).json({ error: 'Session already ended' }); return; }
 
-  let filePath = session.recording_path;
-  if (!filePath) {
+  // Path is derived from the validated id, never from the stored value
+  const filePath = path.join(config.recordingsDir, `${id}.webm`);
+  if (!session.recording_path) {
     fs.mkdirSync(config.recordingsDir, { recursive: true });
-    filePath = path.join(config.recordingsDir, `${id}.webm`);
     execute('UPDATE sessions SET recording_path = ? WHERE id = ?', [filePath, id]);
   }
 

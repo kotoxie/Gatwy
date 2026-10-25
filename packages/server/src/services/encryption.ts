@@ -143,7 +143,12 @@ export interface RdpRecordingWriter {
  * Writes the magic header + IV synchronously on creation.
  * Throws if the file already exists: a recording is never reopened, since that would truncate it.
  */
-export function openRdpRecordingFile(filePath: string): RdpRecordingWriter {
+export function openRdpRecordingFile(requestedPath: string): RdpRecordingWriter {
+  const recordingsRoot = path.resolve(config.recordingsDir);
+  const filePath = path.resolve(requestedPath);
+  if (!filePath.startsWith(recordingsRoot + path.sep)) {
+    throw new Error('Recording path outside recordings directory');
+  }
   const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv(STREAM_ALGORITHM, encryptionKey, iv);
   const header = Buffer.concat([REC_MAGIC, Buffer.from([REC_VERSION]), iv]);
