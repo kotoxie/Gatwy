@@ -898,7 +898,7 @@ export function FileBrowser({
                       className="flex-1 px-1 py-0 text-sm bg-surface border border-accent rounded text-text-primary focus:outline-hidden focus:ring-1 focus:ring-accent"
                     />
                   ) : (
-                    <span className="flex-1 text-text-primary truncate text-sm leading-none">{f.filename}</span>
+                    <span className="flex-1 text-text-primary truncate text-sm leading-normal">{f.filename}</span>
                   )}
                   <span className="shrink-0 text-[11px] tabular-nums text-text-secondary/50 w-16 text-right">
                     {!isDir(f) && f.size != null ? formatSize(f.size) : ''}
