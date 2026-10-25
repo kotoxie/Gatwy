@@ -24,7 +24,7 @@
     "jsonwebtoken": "^9.0.3",
     "ldapts": "^9.0.0",
     "mysql2": "^3.23.1",
-    "nodemailer": "^10.0.15",
+    "nodemailer": "^10.1.4",
     "otplib": "^13.4.1",
     "pg": "^8.22.0",
     "qrcode": "^1.5.4",
