@@ -79,7 +79,7 @@ export function SessionsLayer({
         return (
           <div key={tab.id} style={style}>
             {tab.protocol === 'rdp' && (
-              <RdpSession tab={tab} onStatusChange={onStatusChange} onClose={onClose} />
+              <RdpSession tab={tab} isActive={isActive} onStatusChange={onStatusChange} onClose={onClose} />
             )}
             {tab.protocol === 'ssh' && (
               <SshSession
