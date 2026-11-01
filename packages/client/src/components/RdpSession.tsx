@@ -3,6 +3,7 @@ import type { Tab } from '../pages/MainLayout';
 import { getWsTicket } from '../lib/wsTicket';
 import { ADMIN_DISCONNECT_CODE, ADMIN_DISCONNECT_REASON } from '../lib/adminDisconnect';
 import { rdpKeyAction } from '../lib/rdpKeyboard';
+import { whenActive } from '../lib/rdpInputGate';
 import { DisconnectOverlay } from './DisconnectOverlay';
 import { RdpMobileKeyboard } from './RdpMobileKeyboard';
 import { RdpClipboardService } from '../services/rdpClipboard';
@@ -46,12 +47,16 @@ function isMidActivationRedirectError(backtrace: string) {
 
 interface RdpSessionProps {
   tab: Tab;
+  isActive: boolean;
   onStatusChange: (tabId: string, status: Tab['status']) => void;
   onClose: (tabId: string) => void;
 }
 
-export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
+export function RdpSession({ tab, isActive, onStatusChange, onClose }: RdpSessionProps) {
   const outerRef = useRef<HTMLDivElement>(null);
+  // Read by the window-level input handlers, which are bound once per connection.
+  const isActiveRef = useRef(isActive);
+  const releaseInputsRef = useRef<(() => void) | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sessionRef = useRef<any>(null);
@@ -82,6 +87,15 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
   const fileTransferRef = useRef<RdpFileTransferHandle>(null);
   const autoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const disableDisplayControlRef = useRef(false);
+
+  useEffect(() => {
+    isActiveRef.current = isActive;
+    // Don't leave keys held down on the session the user just switched away from
+    if (!isActive) {
+      releaseInputsRef.current?.();
+      setIsDraggingFiles(false);
+    }
+  }, [isActive]);
 
   // ── Fullscreen + Keyboard Lock ─────────────────────────────────────────────
   const toggleFullscreen = useCallback(() => {
@@ -786,15 +800,24 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         canvas.addEventListener('mouseup', onMouseUp);
         canvas.addEventListener('wheel', onWheel, { passive: false });
         canvas.addEventListener('contextmenu', onContextMenu);
+        // Hidden tabs stay mounted, so only the active one may react to window-level input
+        const tabIsActive = () => isActiveRef.current;
+        const onKeyActive = whenActive(tabIsActive, onKey);
+        const onPasteActive = whenActive(tabIsActive, onPaste);
+        const onFileDragEnterActive = whenActive(tabIsActive, onFileDragEnter);
+        const onFileDragOverActive = whenActive(tabIsActive, onFileDragOver);
+        const onFileDragLeaveActive = whenActive(tabIsActive, onFileDragLeave);
+        const onFileDropActive = whenActive(tabIsActive, onFileDrop);
+        releaseInputsRef.current = onBlur;
         // Capture phase: our handler runs before the browser acts on shortcuts
-        window.addEventListener('keydown', onKey, true);
-        window.addEventListener('keyup', onKey, true);
-        window.addEventListener('paste', onPaste, false);
+        window.addEventListener('keydown', onKeyActive, true);
+        window.addEventListener('keyup', onKeyActive, true);
+        window.addEventListener('paste', onPasteActive, false);
         window.addEventListener('blur', onBlur, false);
-        window.addEventListener('dragenter', onFileDragEnter, false);
-        window.addEventListener('dragover', onFileDragOver, false);
-        window.addEventListener('dragleave', onFileDragLeave, false);
-        window.addEventListener('drop', onFileDrop, false);
+        window.addEventListener('dragenter', onFileDragEnterActive, false);
+        window.addEventListener('dragover', onFileDragOverActive, false);
+        window.addEventListener('dragleave', onFileDragLeaveActive, false);
+        window.addEventListener('drop', onFileDropActive, false);
 
         await session.run();
 
@@ -809,14 +832,15 @@ export function RdpSession({ tab, onStatusChange, onClose }: RdpSessionProps) {
         canvas.removeEventListener('mouseup', onMouseUp);
         canvas.removeEventListener('wheel', onWheel);
         canvas.removeEventListener('contextmenu', onContextMenu);
-        window.removeEventListener('keydown', onKey, true);
-        window.removeEventListener('keyup', onKey, true);
-        window.removeEventListener('paste', onPaste);
+        releaseInputsRef.current = null;
+        window.removeEventListener('keydown', onKeyActive, true);
+        window.removeEventListener('keyup', onKeyActive, true);
+        window.removeEventListener('paste', onPasteActive);
         window.removeEventListener('blur', onBlur);
-        window.removeEventListener('dragenter', onFileDragEnter);
-        window.removeEventListener('dragover', onFileDragOver);
-        window.removeEventListener('dragleave', onFileDragLeave);
-        window.removeEventListener('drop', onFileDrop);
+        window.removeEventListener('dragenter', onFileDragEnterActive);
+        window.removeEventListener('dragover', onFileDragOverActive);
+        window.removeEventListener('dragleave', onFileDragLeaveActive);
+        window.removeEventListener('drop', onFileDropActive);
 
         if (!cancelled) showDisconnect(adminDisconnected ? ADMIN_DISCONNECT_REASON : 'The remote session has ended.');
       } catch (err) {
