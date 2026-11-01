@@ -12,7 +12,7 @@ import { resolveClientIp } from '../services/ip.js';
 import { recordingSessionGuard } from '../middleware/preBodyGuards.js';
 import { sessionsReadLimiter, sessionsActionLimiter, recordingChunkLimiter } from '../middleware/rateLimit.js';
 import { connectionAccessWhere } from '../services/permissions.js';
-import { listActiveSessions, getActiveSession, endActiveSession, isTargetInUseByOthers, targetKey } from '../ws/activeSessions.js';
+import { listActiveSessions, getActiveSession, endActiveSession, hasActiveSession, isTargetInUseByOthers, targetKey } from '../ws/activeSessions.js';
 
 const router = Router();
 router.use(authRequired);
@@ -269,17 +269,27 @@ router.post('/rdp-session', (req: Request, res: Response) => {
   res.json({ sessionId, shouldRecord: true });
 });
 
-// POST /rdp-file-transfer — audit log an RDP file transfer event (client-side CLIPRDR)
-router.post('/rdp-file-transfer', (req: Request, res: Response) => {
+// POST /rdp-file-transfer — audit log an RDP file transfer event (client-side CLIPRDR).
+// The server never sees the transfer itself, so this is a client report: it is accepted only from a
+// user who may use RDP, has a live RDP session on that connection, and can still open the connection.
+router.post('/rdp-file-transfer', requirePermission('protocols.rdp'), (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const { connectionId, fileName, fileSize, direction } = req.body as {
-    connectionId?: string;
-    fileName?: string;
-    fileSize?: number;
-    direction?: 'upload' | 'download';
+    connectionId?: unknown; fileName?: unknown; fileSize?: unknown; direction?: unknown;
   };
-  if (!connectionId || !fileName || !direction) {
-    res.status(400).json({ error: 'connectionId, fileName, and direction are required' });
+  if (typeof connectionId !== 'string' || !connectionId || typeof fileName !== 'string' || !fileName
+      || (direction !== 'upload' && direction !== 'download')) {
+    res.status(400).json({ error: 'connectionId, fileName, and direction (upload|download) are required' });
+    return;
+  }
+  const access = connectionAccessWhere('connections', userId, req.user!.role);
+  const conn = queryOne<{ id: string }>(
+    `SELECT id FROM connections WHERE id = ? AND protocol = 'rdp' AND ${access.where}`,
+    [connectionId, ...access.params],
+  );
+  if (!conn) { res.status(404).json({ error: 'Connection not found' }); return; }
+  if (!hasActiveSession('rdp', connectionId, userId)) {
+    res.status(403).json({ error: 'No active RDP session on this connection' });
     return;
   }
 
@@ -287,7 +297,11 @@ router.post('/rdp-file-transfer', (req: Request, res: Response) => {
     userId,
     eventType: `session.rdp.file_${direction}`,
     target: connectionId,
-    details: { fileName, fileSize: fileSize ?? 0, direction },
+    details: {
+      fileName: fileName.slice(0, 255),
+      fileSize: typeof fileSize === 'number' && Number.isFinite(fileSize) && fileSize >= 0 ? fileSize : 0,
+      direction,
+    },
     ipAddress: resolveClientIp(req),
   });
   res.json({ ok: true });

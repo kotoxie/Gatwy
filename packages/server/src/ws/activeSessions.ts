@@ -75,6 +75,14 @@ export function isTargetInUseByOthers(protocol: ActiveSessionProtocol, target: s
   return false;
 }
 
+/** Does this user have a live session of this protocol on this connection? */
+export function hasActiveSession(protocol: ActiveSessionProtocol, connectionId: string, userId: string): boolean {
+  for (const s of registry.values()) {
+    if (s.protocol === protocol && s.connectionId === connectionId && s.userId === userId) return true;
+  }
+  return false;
+}
+
 export function listActiveSessions(): ActiveSession[] {
   return [...registry.values()].sort((a, b) => a.startedAt - b.startedAt);
 }
