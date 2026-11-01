@@ -9,6 +9,7 @@ import { SettingsPanel } from '../components/settings/SettingsPanel';
 import { useSettings } from '../hooks/useSettings';
 import { useGeneralPrefs } from '../hooks/useGeneralPrefs';
 import { useAuth } from '../hooks/useAuth';
+import { confirmUnload, hasLiveTerminalSession } from '../lib/unloadGuard';
 import type { PaneNode } from '../types/panes';
 import { type Protocol, type SessionProtocol } from '../types/protocol.js';
 import {
@@ -230,6 +231,14 @@ export function MainLayout() {
   const activeViewIdRef = useRef<string | null>(activeViewId);
   useEffect(() => { viewsRef.current = views; }, [views]);
   useEffect(() => { activeViewIdRef.current = activeViewId; }, [activeViewId]);
+
+  // Ctrl+W (nano search) is reserved by the browser and would silently kill live terminal sessions.
+  const hasLiveTerminal = useMemo(() => hasLiveTerminalSession(tabs), [tabs]);
+  useEffect(() => {
+    if (!hasLiveTerminal) return;
+    window.addEventListener('beforeunload', confirmUnload);
+    return () => window.removeEventListener('beforeunload', confirmUnload);
+  }, [hasLiveTerminal]);
 
   const { commandPaletteShortcut } = useGeneralPrefs();
 
