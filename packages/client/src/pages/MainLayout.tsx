@@ -9,7 +9,7 @@ import { SettingsPanel } from '../components/settings/SettingsPanel';
 import { useSettings } from '../hooks/useSettings';
 import { useGeneralPrefs } from '../hooks/useGeneralPrefs';
 import { useAuth } from '../hooks/useAuth';
-import { confirmUnload, hasLiveTerminalSession } from '../lib/unloadGuard';
+import { confirmUnload, hasLiveTerminalSession, noteReloadShortcut } from '../lib/unloadGuard';
 import type { PaneNode } from '../types/panes';
 import { type Protocol, type SessionProtocol } from '../types/protocol.js';
 import {
@@ -236,8 +236,15 @@ export function MainLayout() {
   const hasLiveTerminal = useMemo(() => hasLiveTerminalSession(tabs), [tabs]);
   useEffect(() => {
     if (!hasLiveTerminal) return;
-    window.addEventListener('beforeunload', confirmUnload);
-    return () => window.removeEventListener('beforeunload', confirmUnload);
+    const onBeforeUnload = (e: BeforeUnloadEvent) => confirmUnload(e);
+    const onKeyDown = (e: KeyboardEvent) => noteReloadShortcut(e);
+    window.addEventListener('beforeunload', onBeforeUnload);
+    // Bubble phase on purpose: a terminal that consumed the key has already called preventDefault()
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      window.removeEventListener('keydown', onKeyDown);
+    };
   }, [hasLiveTerminal]);
 
   const { commandPaletteShortcut } = useGeneralPrefs();
