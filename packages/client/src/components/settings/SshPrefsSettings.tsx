@@ -176,6 +176,7 @@ interface SshPrefs {
   cursorBlink: boolean;
   theme: SshThemeName;
   scrollback: string;
+  monitorEnabled?: boolean;
 }
 
 export function SshPrefsSettings() {
@@ -185,6 +186,7 @@ export function SshPrefsSettings() {
   const [cursorBlink, setCursorBlink] = useState(true);
   const [theme, setTheme] = useState<SshThemeName>(DEFAULT_THEME);
   const [scrollback, setScrollback] = useState('5000');
+  const [monitorEnabled, setMonitorEnabled] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -197,6 +199,7 @@ export function SshPrefsSettings() {
         setCursorBlink(d.cursorBlink !== false);
         setTheme((d.theme as SshThemeName) ?? DEFAULT_THEME);
         setScrollback(d.scrollback ?? '5000');
+        setMonitorEnabled(d.monitorEnabled !== false);
       })
       .catch(() => {});
   }, []);
@@ -216,6 +219,7 @@ export function SshPrefsSettings() {
           cursorBlink,
           theme,
           scrollback,
+          monitorEnabled,
         }),
       });
       if (res.ok) {
@@ -297,6 +301,17 @@ export function SshPrefsSettings() {
           </section>
 
           <section>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-text-secondary mb-3">Monitoring</h3>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <span className="text-sm font-medium text-text-secondary">Server stats footer</span>
+                <p className="text-xs text-text-secondary/60 mt-0.5">Shows CPU, RAM, network, uptime and disk usage of Linux hosts below the terminal.</p>
+              </div>
+              <Toggle value={monitorEnabled} onChange={setMonitorEnabled} />
+            </div>
+          </section>
+
+          <section>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-text-secondary mb-3">Advanced</h3>
             <div>
               <label className="block text-sm font-medium text-text-secondary mb-1">Scrollback Lines</label>
@@ -341,6 +356,7 @@ export function SshPrefsSettings() {
                     setCursorBlink(d.cursorBlink === true || d.cursorBlink === 'true');
                     setTheme((d.theme as SshThemeName) ?? DEFAULT_THEME);
                     setScrollback(String(d.scrollback ?? '5000'));
+                    setMonitorEnabled(d.monitorEnabled !== false);
                   }
                   showToast('Reset to global defaults.', 'success');
                 } catch {

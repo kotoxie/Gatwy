@@ -8,6 +8,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useSshPrefs } from '../hooks/useSshPrefs';
 import { SSH_THEMES } from '../lib/sshThemes';
 import { getWsTicket } from '../lib/wsTicket';
+import { SshStatsBar, type SshStats } from './SshStatsBar';
 
 interface SshSessionProps {
   tab: Tab;
@@ -52,6 +53,7 @@ export function SshSession({ tab, isActive, paneWidth, paneHeight, onStatusChang
   const [disconnectMessage, setDisconnectMessage] = useState('');
   const [reconnectCount, setReconnectCount] = useState(0);
   const [activeTunnels, setActiveTunnels] = useState<TunnelInfo[]>([]);
+  const [stats, setStats] = useState<SshStats | null>(null);
   const [promptState, setPromptState] = useState<'loading' | 'needed' | 'ready'>('loading');
   const [promptInput, setPromptInput] = useState('');
   const promptOnConnectRef = useRef(false);
@@ -84,6 +86,7 @@ export function SshSession({ tab, isActive, paneWidth, paneHeight, onStatusChang
     setDisconnected(false);
     setDisconnectMessage('');
     setActiveTunnels([]);
+    setStats(null);
     hostKeyChangeRef.current = false;
     setHostKeyChange(null);
     setTrustError('');
@@ -267,6 +270,8 @@ export function SshSession({ tab, isActive, paneWidth, paneHeight, onStatusChang
               if (!cancelled) { setDisconnectMessage(msg.message); setDisconnected(true); onStatusChange(tab.id, 'disconnected'); }
             } else if (msg.type === 'tunnels') {
               setActiveTunnels(msg.tunnels || []);
+            } else if (msg.type === 'stats') {
+              if (!cancelled) setStats(msg as SshStats);
             } else if (msg.type === 'hostKeyChanged') {
               if (!cancelled) {
                 hostKeyChangeRef.current = true;
@@ -331,7 +336,7 @@ export function SshSession({ tab, isActive, paneWidth, paneHeight, onStatusChang
       }
     });
     return () => cancelAnimationFrame(id);
-  }, [activeTunnels.length]);
+  }, [activeTunnels.length, stats !== null]);
 
   return (
     <div
@@ -407,6 +412,8 @@ export function SshSession({ tab, isActive, paneWidth, paneHeight, onStatusChang
               {t.status === 'failed' && <span className="text-red-400 ml-0.5">✕</span>}
             </span>
           ))}
+
+          {stats && !disconnected && <SshStatsBar stats={stats} />}
         </div>
       )}
 

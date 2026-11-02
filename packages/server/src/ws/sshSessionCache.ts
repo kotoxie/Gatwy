@@ -30,6 +30,7 @@ export interface SshCachedSession {
   castFile: Writable | null;
   castStart: number;
   cmdTracker: CommandTracker | null;
+  stopMonitor: (() => void) | null;
   tornDown: boolean; // set by teardownSession() so it runs only once
 }
 

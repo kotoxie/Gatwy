@@ -35,6 +35,7 @@ import {
 import { CommandTracker } from './commandTracker.js';
 import { isDangerousTunnelHost } from '../services/ssrfGuard.js';
 import { parseUpgradeUrl } from './upgradeUrl.js';
+import { isMonitoringEnabled, startMonitor } from './sshMonitor.js';
 
 interface ConnectionRow {
   id: string; host: string; port: number; protocol: string;
@@ -70,6 +71,7 @@ function teardownSession(
   removeActiveSession(sessionDbId);
   if (session.castFile) { try { session.castFile.end(); } catch { /**/ } session.castFile = null; }
   if (session.cmdTracker) { try { session.cmdTracker.flush(); } catch { /**/ } session.cmdTracker = null; }
+  if (session.stopMonitor) { session.stopMonitor(); session.stopMonitor = null; }
   session.tunnelServers.forEach((s) => { try { s.close(); } catch { /**/ } });
   try { session.ssh.end(); } catch { /**/ }
   execute("UPDATE sessions SET ended_at = datetime('now') WHERE id = ?", [sessionDbId]);
@@ -334,10 +336,17 @@ export function setupSshProxy(server: https.Server, basePath = ''): void {
           cols, rows,
           castFile, castStart,
           cmdTracker: doRecord ? new CommandTracker(sessionDbId, castStart) : null,
+          stopMonitor: null,
           tornDown: false,
         };
         storeSession(clientSessionId, session);
         sessionStored = true;
+        if (isMonitoringEnabled(userId)) {
+          session.stopMonitor = startMonitor(ssh, (stats) => {
+            const live = getSession(clientSessionId);
+            if (live === session && live.ws?.readyState === WebSocket.OPEN) live.ws.send(JSON.stringify(stats));
+          });
+        }
         addActiveSession({
           id: sessionDbId, userId, connectionId, connectionName: conn.name,
           protocol: 'ssh',

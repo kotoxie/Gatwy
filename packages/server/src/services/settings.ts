@@ -28,6 +28,7 @@ const DEFAULTS: Record<string, string> = {
   'ssh.font_family': 'Cascadia Code, Fira Code, Menlo, Monaco, Courier New, monospace',
   'ssh.scrollback': '5000',
   'ssh.cursor_style': 'block',
+  'ssh.monitor_enabled': 'true',
   'rdp.default_port': '3389',
   'rdp.default_width': '1920',
   'rdp.default_height': '1080',

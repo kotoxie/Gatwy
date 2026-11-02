@@ -56,6 +56,7 @@ export function GlobalSettings() {
   const [timezone, setTimezone] = useState('UTC');
   const [healthMonitorEnabled, setHealthMonitorEnabled] = useState(true);
   const [autoCloseDisconnected, setAutoCloseDisconnected] = useState(true);
+  const [sshMonitorEnabled, setSshMonitorEnabled] = useState(true);
   const [savingGeneral, setSavingGeneral] = useState(false);
 
   // Logo
@@ -92,6 +93,7 @@ export function GlobalSettings() {
     setAuditRetention(settings['audit.retention_days'] ?? '90');
     setHealthMonitorEnabled(settings['health_monitor.enabled'] !== 'false');
     setAutoCloseDisconnected(settings['session.auto_close_disconnected_enabled'] !== 'false');
+    setSshMonitorEnabled(settings['ssh.monitor_enabled'] !== 'false');
     setVersionAuditLog(settings['version.audit_log_checks'] !== 'false');
     setVersionToast(settings['version.toast_feedback'] !== 'false');
     setVersionNotify(settings['version.notify_on_update'] === 'true');
@@ -137,6 +139,7 @@ export function GlobalSettings() {
         'audit.retention_days': auditRetention,
         'health_monitor.enabled': String(healthMonitorEnabled),
         'session.auto_close_disconnected_enabled': String(autoCloseDisconnected),
+        'ssh.monitor_enabled': String(sshMonitorEnabled),
       });
       showToast(result.ok ? 'Saved.' : result.error!, result.ok ? 'success' : 'error');
     } catch {
@@ -302,6 +305,13 @@ export function GlobalSettings() {
             <div>
               <span className="text-sm text-text-secondary">Auto-close disconnected sessions</span>
               <p className="text-xs text-text-secondary/60 mt-0.5">Automatically closes a session tab 15 seconds after it disconnects. Disable to keep the tab open until the user closes it manually.</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Toggle value={sshMonitorEnabled} onChange={setSshMonitorEnabled} />
+            <div>
+              <span className="text-sm text-text-secondary">SSH server stats footer</span>
+              <p className="text-xs text-text-secondary/60 mt-0.5">Default for all users: shows CPU, RAM, network, uptime and disk usage of Linux hosts below SSH terminals. Each user can override it under SSH Terminal settings.</p>
             </div>
           </div>
 

@@ -192,6 +192,7 @@ router.get('/ssh-prefs', (req: Request, res: Response) => {
     cursorBlink: getSetting('ssh.cursor_blink') !== 'false',
     theme: getSetting('ssh.theme') || 'vscode-dark',
     scrollback: getSetting('ssh.scrollback'),
+    monitorEnabled: getSetting('ssh.monitor_enabled') !== 'false',
   };
   res.json({ ...globalDefaults, ...userPrefs });
 });
