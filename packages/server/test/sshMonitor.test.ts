@@ -56,6 +56,10 @@ describe('parseSample', () => {
   it('returns null without memory info', () => {
     assert.equal(parseSample(output({ mem: '' })), null);
   });
+
+  it('ignores text printed by shell startup files before the output', () => {
+    assert.equal(parseSample(`Welcome back!\n${output()}`)!.cpuTotal, 1000);
+  });
 });
 
 describe('StatsCalculator', () => {
@@ -133,10 +137,10 @@ describe('startMonitor over a real SSH connection', () => {
     await withServer(() => 'head: cannot open /proc/stat\n', async (client, execs) => {
       let got = 0;
       const stop = startMonitor(client, () => { got++; });
-      await new Promise((r) => setTimeout(r, MONITOR_INTERVAL_MS * 2 + 500));
+      await new Promise((r) => setTimeout(r, MONITOR_INTERVAL_MS * 3));
       stop();
       assert.equal(got, 0);
-      assert.equal(execs(), 1);
+      assert.equal(execs(), 3);
     });
   });
 });

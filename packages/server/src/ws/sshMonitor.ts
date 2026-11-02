@@ -10,9 +10,9 @@ const EXEC_TIMEOUT_MS = 5000;
 
 // Plain command list (no quoting or variables) so it runs under any login shell.
 const MONITOR_COMMAND =
-  'head -n 1 /proc/stat; echo ===mem; grep -E "^(MemTotal|MemAvailable):" /proc/meminfo; ' +
-  'echo ===up; cut -d" " -f1 /proc/uptime; echo ===net; cat /proc/net/dev; ' +
-  'echo ===host; hostname; echo ===disk; df -P /';
+  'head -n 1 /proc/stat; echo "===mem"; grep -E "^(MemTotal|MemAvailable):" /proc/meminfo; ' +
+  'echo "===up"; cut -d" " -f1 /proc/uptime; echo "===net"; cat /proc/net/dev; ' +
+  'echo "===host"; hostname; echo "===disk"; df -P /';
 
 export interface RawSample {
   cpuTotal: number;
@@ -49,7 +49,9 @@ export function parseSample(output: string): RawSample | null {
     sections.get(current)!.push(line);
   }
 
-  const cpuFields = (sections.get('cpu')?.[0] ?? '').trim().split(/\s+/);
+  // Shell startup files may print before the command's own output.
+  const cpuLine = (sections.get('cpu') ?? []).find((l) => /^cpu\s/.test(l)) ?? '';
+  const cpuFields = cpuLine.trim().split(/\s+/);
   if (cpuFields[0] !== 'cpu') return null;
   const cpu = cpuFields.slice(1, 9).map(Number);
   if (cpu.length < 4 || cpu.some((n) => !Number.isFinite(n))) return null;
@@ -160,7 +162,6 @@ export function startMonitor(ssh: SshClient, onStats: (stats: MonitorStats) => v
   let stopped = false;
   let inFlight = false;
   let failures = 0;
-  let gotSample = false;
 
   const stop = () => { stopped = true; clearInterval(interval); };
 
@@ -171,13 +172,11 @@ export function startMonitor(ssh: SshClient, onStats: (stats: MonitorStats) => v
       const sample = parseSample(await runOnce(ssh));
       if (stopped) return;
       if (!sample) throw new Error('unsupported');
-      gotSample = true;
       failures = 0;
       const stats = calc.next(sample, Date.now());
       if (stats) onStats(stats);
     } catch {
-      failures++;
-      if (!gotSample || failures >= MAX_FAILURES) stop();
+      if (++failures >= MAX_FAILURES) stop();
     } finally {
       inFlight = false;
     }
