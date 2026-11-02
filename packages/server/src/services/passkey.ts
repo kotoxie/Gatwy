@@ -5,7 +5,7 @@ import {
   verifyAuthenticationResponse,
   type VerifiedRegistrationResponse,
   type VerifiedAuthenticationResponse,
-  type AuthenticatorTransportFuture,
+  type AuthenticatorTransport,
   type PublicKeyCredentialCreationOptionsJSON,
   type PublicKeyCredentialRequestOptionsJSON,
   type RegistrationResponseJSON,
@@ -116,7 +116,7 @@ export async function generatePasskeyRegistrationOptions(
   const existingPasskeys = getActivePasskeys(userId);
   const excludeCredentials = existingPasskeys.map((pk) => ({
     id: pk.credential_id,
-    transports: pk.transports ? JSON.parse(pk.transports) as AuthenticatorTransportFuture[] : undefined,
+    transports: pk.transports ? JSON.parse(pk.transports) as AuthenticatorTransport[] : undefined,
   }));
 
   const options = await generateRegistrationOptions({
@@ -236,7 +236,7 @@ export async function generatePasskeyAuthenticationOptions(
 
   const allowCredentials = passkeys.map((pk) => ({
     id: pk.credential_id,
-    transports: pk.transports ? JSON.parse(pk.transports) as AuthenticatorTransportFuture[] : undefined,
+    transports: pk.transports ? JSON.parse(pk.transports) as AuthenticatorTransport[] : undefined,
   }));
 
   const options = await generateAuthenticationOptions({
