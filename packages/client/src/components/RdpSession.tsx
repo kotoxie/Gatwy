@@ -36,6 +36,7 @@ const RESIZE_DEBOUNCE_MS = 150;
 // This lets the browser forward shortcuts it would normally intercept
 // (Ctrl+Tab, Ctrl+W, Ctrl+T, F11, etc.) to our keydown handler instead.
 // OS-level shortcuts (Alt+Tab, Win+R, Win+D) remain with the OS regardless.
+const UNICODE_KEYBOARD_KEY = 'gatwy.rdp.unicodeKeyboard';
 const KEYBOARD_LOCK_KEYS = [
   'Tab', 'Escape', 'MetaLeft', 'MetaRight',
   'F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12',
@@ -87,6 +88,15 @@ export function RdpSession({ tab, isActive, onStatusChange, onClose }: RdpSessio
   const fileTransferRef = useRef<RdpFileTransferHandle>(null);
   const autoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const disableDisplayControlRef = useRef(false);
+  const [unicodeKeyboard, setUnicodeKeyboard] = useState(() => localStorage.getItem(UNICODE_KEYBOARD_KEY) === '1');
+  const unicodeKeyboardRef = useRef(unicodeKeyboard);
+  // Character each held key was sent as, so its release matches even if Shift or the mode changed meanwhile.
+  const heldUnicodeRef = useRef(new Map<string, string>());
+
+  useEffect(() => {
+    unicodeKeyboardRef.current = unicodeKeyboard;
+    localStorage.setItem(UNICODE_KEYBOARD_KEY, unicodeKeyboard ? '1' : '0');
+  }, [unicodeKeyboard]);
 
   useEffect(() => {
     isActiveRef.current = isActive;
@@ -720,7 +730,14 @@ export function RdpSession({ tab, isActive, onStatusChange, onClose }: RdpSessio
           // the matching keyup reports the new one and corrects it.
           syncLockKeys(e);
 
-          const action = rdpKeyAction(e);
+          let action = rdpKeyAction(e, unicodeKeyboardRef.current);
+          const held = heldUnicodeRef.current;
+          if (e.type === 'keyup' && held.has(e.code)) {
+            action = { kind: 'unicode', pressed: false, key: held.get(e.code)! };
+            held.delete(e.code);
+          } else if (action?.kind === 'unicode' && action.pressed) {
+            held.set(e.code, action.key);
+          }
           if (!action) return;
 
           const forward = () => {
@@ -757,6 +774,7 @@ export function RdpSession({ tab, isActive, onStatusChange, onClose }: RdpSessio
           heldKeysTimer = null;
           heldKeys = null;
           session.releaseAllInputs();
+          heldUnicodeRef.current.clear();
           lastLocks = ''; // re-sync on the next event — locks may change while away
         };
         const onContextMenu = (e: Event) => e.preventDefault();
@@ -1076,6 +1094,24 @@ export function RdpSession({ tab, isActive, onStatusChange, onClose }: RdpSessio
               Fullscreen
             </>
           )}
+        </button>
+
+        {/* Unicode keyboard */}
+        <button
+          onClick={() => setUnicodeKeyboard(v => !v)}
+          role="switch"
+          aria-checked={unicodeKeyboard}
+          title="Send typed characters directly instead of key positions, so the remote keyboard layout does not matter (e.g. special characters in passwords on the logon screen). Shortcuts still use key positions."
+          className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-surface-hover text-text-primary text-sm transition-colors text-left w-full"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="2" y="6" width="20" height="12" rx="2" />
+            <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" />
+          </svg>
+          <span className="flex-1">Unicode keyboard</span>
+          <span className={`w-8 h-4 rounded-full relative shrink-0 transition-colors ${unicodeKeyboard ? 'bg-accent' : 'bg-border'}`}>
+            <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${unicodeKeyboard ? 'left-4' : 'left-0.5'}`} />
+          </span>
         </button>
 
         {/* Keyboard note */}

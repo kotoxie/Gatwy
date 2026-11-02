@@ -74,4 +74,26 @@ describe('rdpKeyAction', () => {
     assert.equal(rdpKeyAction(key('keydown', '', { key: 'é', metaKey: true })), null);
     assert.equal(rdpKeyAction(key('keydown', '', { key: 'Process' })), null);
   });
+
+  describe('unicode mode', () => {
+    it('sends printable characters as unicode regardless of the layout', () => {
+      assert.deepEqual(rdpKeyAction(key('keydown', 'KeyY', { key: 'z' }), true), { kind: 'unicode', pressed: true, key: 'z' });
+      assert.deepEqual(rdpKeyAction(key('keydown', 'Digit2', { key: '"' }), true), { kind: 'unicode', pressed: true, key: '"' });
+    });
+
+    it('keeps scancodes for non-character keys and shortcuts', () => {
+      assert.deepEqual(rdpKeyAction(key('keydown', 'Enter', { key: 'Enter' }), true), { kind: 'scancode', pressed: true, scancode: 0x1C });
+      assert.deepEqual(rdpKeyAction(key('keydown', 'KeyC', { key: 'c', ctrlKey: true }), true), { kind: 'scancode', pressed: true, scancode: 0x2E });
+      assert.deepEqual(rdpKeyAction(key('keydown', 'KeyA', { key: 'a', metaKey: true }), true), { kind: 'scancode', pressed: true, scancode: 0x1E });
+    });
+
+    it('sends AltGr characters as unicode', () => {
+      const altGr = key('keydown', 'Digit2', { key: '@', ctrlKey: true, altKey: true, getModifierState: (k: string) => k === 'AltGraph' });
+      assert.deepEqual(rdpKeyAction(altGr, true), { kind: 'unicode', pressed: true, key: '@' });
+    });
+
+    it('is off by default', () => {
+      assert.deepEqual(rdpKeyAction(key('keydown', 'KeyY', { key: 'z' })), { kind: 'scancode', pressed: true, scancode: 0x15 });
+    });
+  });
 });

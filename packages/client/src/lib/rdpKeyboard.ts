@@ -49,18 +49,29 @@ export const NO_REPEAT_CODES = new Set([
 // state on keydown (Chrome on Windows), leaving the remote inverted.
 export const LOCK_CODES = new Set(['CapsLock', 'NumLock', 'ScrollLock']);
 
-export type RdpKeyEvent = Pick<KeyboardEvent, 'type' | 'code' | 'key' | 'repeat' | 'ctrlKey' | 'altKey' | 'metaKey'>;
+export type RdpKeyEvent =
+  Pick<KeyboardEvent, 'type' | 'code' | 'key' | 'repeat' | 'ctrlKey' | 'altKey' | 'metaKey'> &
+  Partial<Pick<KeyboardEvent, 'getModifierState'>>;
 
 export type RdpKeyAction =
   | { kind: 'scancode'; pressed: boolean; scancode: number }
   | { kind: 'unicode'; pressed: boolean; key: string };
 
-/** What to send to the RDP session for a browser key event, or null to send nothing. */
-export function rdpKeyAction(e: RdpKeyEvent): RdpKeyAction | null {
+/**
+ * What to send to the RDP session for a browser key event, or null to send nothing.
+ * With `unicodeMode`, printable characters are sent as characters rather than scancodes, so the
+ * result no longer depends on the keyboard layout active on the remote machine.
+ */
+export function rdpKeyAction(e: RdpKeyEvent, unicodeMode = false): RdpKeyAction | null {
   if (LOCK_CODES.has(e.code)) return null;
   if (e.repeat && NO_REPEAT_CODES.has(e.code)) return null;
 
   const pressed = e.type === 'keydown';
+  if (unicodeMode && e.key.length === 1 && !e.metaKey) {
+    // AltGr is reported as Ctrl+Alt on Windows; it still produces a printable character.
+    const altGr = e.getModifierState?.('AltGraph') === true;
+    if (altGr || (!e.ctrlKey && !e.altKey)) return { kind: 'unicode', pressed, key: e.key };
+  }
   const scancode = CODE_TO_SCANCODE[e.code];
   if (scancode !== undefined) return { kind: 'scancode', pressed, scancode };
   // Keys with no scancode mapping fall back to sending the character itself.
