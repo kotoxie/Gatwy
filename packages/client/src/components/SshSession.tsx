@@ -412,10 +412,10 @@ export function SshSession({ tab, isActive, paneWidth, paneHeight, onStatusChang
               {t.status === 'failed' && <span className="text-red-400 ml-0.5">✕</span>}
             </span>
           ))}
-
-          {stats && !disconnected && <SshStatsBar stats={stats} />}
         </div>
       )}
+
+      {stats && !disconnected && <SshStatsBar stats={stats} />}
 
       {hostKeyChange && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/80 p-4">

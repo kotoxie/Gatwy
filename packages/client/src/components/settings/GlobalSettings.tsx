@@ -34,13 +34,13 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
     <button
       type="button"
       onClick={() => onChange(!value)}
-      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
         value ? 'bg-accent' : 'bg-surface-hover border border-border'
       }`}
     >
       <span
-        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-          value ? 'translate-x-4' : 'translate-x-0.5'
+        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+          value ? 'translate-x-[18px]' : 'translate-x-0.5'
         }`}
       />
     </button>
