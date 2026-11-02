@@ -3,6 +3,7 @@ import { queryOne } from '../db/helpers.js';
 import { getSetting } from '../services/settings.js';
 
 export const MONITOR_INTERVAL_MS = 2000;
+const FIRST_RATE_DELAY_MS = 500;
 export const CPU_HISTORY_LENGTH = 60; // 2 minutes at MONITOR_INTERVAL_MS
 const MAX_FAILURES = 3;
 const MAX_OUTPUT_BYTES = 64 * 1024;
@@ -29,13 +30,13 @@ export interface RawSample {
 export interface MonitorStats {
   type: 'stats';
   hostname: string;
-  cpuPercent: number;
+  cpuPercent: number | null;
   cpuHistory: number[];
   memUsedKb: number;
   memTotalKb: number;
   uptimeSeconds: number;
-  rxBytesPerSec: number;
-  txBytesPerSec: number;
+  rxBytesPerSec: number | null;
+  txBytesPerSec: number | null;
   diskPercent: number | null;
 }
 
@@ -98,10 +99,20 @@ export class StatsCalculator {
   private prev: { sample: RawSample; at: number } | null = null;
   private history: number[] = [];
 
-  next(sample: RawSample, now: number): MonitorStats | null {
+  next(sample: RawSample, now: number): MonitorStats {
     const prev = this.prev;
     this.prev = { sample, at: now };
-    if (!prev) return null;
+
+    const base = {
+      type: 'stats' as const,
+      hostname: sample.hostname,
+      memUsedKb: Math.max(0, sample.memTotalKb - sample.memAvailableKb),
+      memTotalKb: sample.memTotalKb,
+      uptimeSeconds: Math.floor(sample.uptimeSeconds),
+      diskPercent: sample.diskPercent,
+    };
+    // Rates need two samples: the first one is sent right away so the footer can appear at once.
+    if (!prev) return { ...base, cpuPercent: null, cpuHistory: [], rxBytesPerSec: null, txBytesPerSec: null };
 
     const seconds = (now - prev.at) / 1000;
     const totalDelta = sample.cpuTotal - prev.sample.cpuTotal;
@@ -112,16 +123,11 @@ export class StatsCalculator {
 
     const rate = (cur: number, before: number) => (seconds > 0 && cur >= before ? (cur - before) / seconds : 0);
     return {
-      type: 'stats',
-      hostname: sample.hostname,
+      ...base,
       cpuPercent,
       cpuHistory: [...this.history],
-      memUsedKb: Math.max(0, sample.memTotalKb - sample.memAvailableKb),
-      memTotalKb: sample.memTotalKb,
-      uptimeSeconds: Math.floor(sample.uptimeSeconds),
       rxBytesPerSec: rate(sample.rxBytes, prev.sample.rxBytes),
       txBytesPerSec: rate(sample.txBytes, prev.sample.txBytes),
-      diskPercent: sample.diskPercent,
     };
   }
 }
@@ -162,8 +168,10 @@ export function startMonitor(ssh: SshClient, onStats: (stats: MonitorStats) => v
   let stopped = false;
   let inFlight = false;
   let failures = 0;
+  let gotSample = false;
+  let earlyTimer: NodeJS.Timeout | null = null;
 
-  const stop = () => { stopped = true; clearInterval(interval); };
+  const stop = () => { stopped = true; clearInterval(interval); if (earlyTimer) clearTimeout(earlyTimer); };
 
   const poll = async () => {
     if (stopped || inFlight) return;
@@ -173,8 +181,11 @@ export function startMonitor(ssh: SshClient, onStats: (stats: MonitorStats) => v
       if (stopped) return;
       if (!sample) throw new Error('unsupported');
       failures = 0;
-      const stats = calc.next(sample, Date.now());
-      if (stats) onStats(stats);
+      const first = !gotSample;
+      gotSample = true;
+      onStats(calc.next(sample, Date.now()));
+      // Don't make the CPU and bandwidth figures wait a full interval for their baseline.
+      if (first) earlyTimer = setTimeout(() => { void poll(); }, FIRST_RATE_DELAY_MS);
     } catch {
       if (++failures >= MAX_FAILURES) stop();
     } finally {

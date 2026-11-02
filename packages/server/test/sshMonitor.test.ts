@@ -63,10 +63,13 @@ describe('parseSample', () => {
 });
 
 describe('StatsCalculator', () => {
-  it('needs two samples and then computes CPU, memory and rates', () => {
+  it('sends memory and uptime at once, then computes CPU and rates from the second sample', () => {
     const calc = new StatsCalculator();
-    assert.equal(calc.next(parseSample(output())!, 0), null);
-    const stats = calc.next(parseSample(output({ cpu: 'cpu  150 0 150 900 0 0 0 0 0 0', rx: 3000, tx: 1500 }))!, 2000)!;
+    const first = calc.next(parseSample(output())!, 0);
+    assert.equal(first.cpuPercent, null);
+    assert.equal(first.rxBytesPerSec, null);
+    assert.equal(first.memTotalKb, 16384000);
+    const stats = calc.next(parseSample(output({ cpu: 'cpu  150 0 150 900 0 0 0 0 0 0', rx: 3000, tx: 1500 }))!, 2000);
     assert.equal(stats.cpuPercent, 50); // 100 busy of 200 ticks
     assert.deepEqual(stats.cpuHistory, [50]);
     assert.equal(stats.memUsedKb, 8192000);
@@ -120,15 +123,28 @@ describe('startMonitor over a real SSH connection', () => {
     try { await run(client, () => execCount); } finally { client.end(); server.close(); }
   }
 
-  it('delivers stats from the second sample on, with the expected command', async () => {
+  it('sends the first sample at once and fills in the rates shortly after', async () => {
     const commands: string[] = [];
     await withServer((cmd, n) => { commands.push(cmd); return output({ rx: n * 2000, tx: n * 1000 }); }, async (client) => {
-      const stats = await new Promise<MonitorStats>((resolve) => {
-        const stop = startMonitor(client, (s) => { stop(); resolve(s); });
+      const received: MonitorStats[] = [];
+      const started = Date.now();
+      let firstAt = 0;
+      let rateAt = 0;
+      await new Promise<void>((resolve) => {
+        const stop = startMonitor(client, (s) => {
+          received.push(s);
+          if (!firstAt) firstAt = Date.now();
+          if (s.rxBytesPerSec !== null) { rateAt = Date.now(); stop(); resolve(); }
+        });
       });
-      assert.equal(stats.type, 'stats');
-      assert.equal(stats.hostname, 'ubu-srv1');
-      assert.ok(stats.rxBytesPerSec > 0);
+      const [first, withRates] = [received[0]!, received[received.length - 1]!];
+      assert.equal(first.hostname, 'ubu-srv1');
+      assert.equal(first.cpuPercent, null);
+      assert.equal(first.rxBytesPerSec, null);
+      assert.deepEqual(first.cpuHistory, []);
+      assert.ok(withRates.rxBytesPerSec! > 0);
+      assert.ok(withRates.cpuPercent !== null);
+      assert.ok(rateAt - started < MONITOR_INTERVAL_MS, 'rates must not wait a full interval');
       assert.match(commands[0]!, /\/proc\/stat/);
     });
   });
