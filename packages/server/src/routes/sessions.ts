@@ -467,21 +467,19 @@ export function purgeOldRecordings(): void {
     const days = parseInt(getSetting('session.recording_retention_days') ?? '90', 10);
     if (days > 0) {
       const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+      // Ended sessions only: a live one still has an open writer, and deleting its file under it
+      // leaves an orphan (RDP recreates it without the header) or an unreadable recording.
       const expired = queryAll<{ id: string; recording_path: string | null }>(
-        'SELECT id, recording_path FROM sessions WHERE recording_path IS NOT NULL AND started_at < ?',
+        'SELECT id, recording_path FROM sessions WHERE recording_path IS NOT NULL AND ended_at IS NOT NULL AND started_at < ?',
         [cutoff],
       );
       for (const row of expired) {
-        if (row.recording_path && fs.existsSync(row.recording_path)) {
-          try { fs.unlinkSync(row.recording_path); } catch { /* ignore */ }
-        }
-      }
-      if (expired.length > 0) {
-        execute(
-          `UPDATE sessions SET recording_path = NULL WHERE recording_path IS NOT NULL AND started_at < ?`,
-          [cutoff],
-        );
-        totalDeleted += expired.length;
+        // Drop the reference only once the file is gone, so a failed unlink is retried next run
+        try {
+          if (row.recording_path && fs.existsSync(row.recording_path)) fs.unlinkSync(row.recording_path);
+          execute('UPDATE sessions SET recording_path = NULL WHERE id = ?', [row.id]);
+          totalDeleted++;
+        } catch { /* ignore */ }
       }
     }
   }
@@ -500,7 +498,7 @@ export function purgeOldRecordings(): void {
 
       if (currentBytes > maxBytes) {
         const rows = queryAll<{ id: string; recording_path: string | null }>(
-          'SELECT id, recording_path FROM sessions WHERE recording_path IS NOT NULL ORDER BY started_at ASC',
+          'SELECT id, recording_path FROM sessions WHERE recording_path IS NOT NULL AND ended_at IS NOT NULL ORDER BY started_at ASC',
           [],
         );
         let sizeDeleted = 0;
