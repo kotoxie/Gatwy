@@ -896,7 +896,12 @@ export function RdpSession({ tab, isActive, onStatusChange, onClose }: RdpSessio
               setStatus('Following remote desktop handoff...');
               setReconnectCount((n) => n + 1);
               return;
-            } else if (kindNum === 0 && backtrace && backtrace.includes('invalid state') && !disableDisplayControlRef.current) {
+            } else if (
+              kindNum === 0 && backtrace && !disableDisplayControlRef.current
+              && (backtrace.includes('invalid state')
+                // Some servers send a truncated Deactivate All PDU when Display Control resizes
+                || (backtrace.includes('ShareControlHeader') && backtrace.includes('not enough bytes')))
+            ) {
               // Some non-Windows RDP servers reject the Display Control channel.
               // Retry without RDPEDISP, but keep CredSSP enabled because GNOME
               // remote desktop requires NLA during its handoff flow.
