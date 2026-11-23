@@ -283,13 +283,12 @@ function readDerMessage(sock: tls.TLSSocket): Promise<Buffer> {
   });
 }
 
-function splitDomain(raw: string): { domain: string; user: string } {
+export function splitDomain(raw: string, explicitDomain = ''): { domain: string; user: string } {
   const backslash = raw.indexOf('\\');
   if (backslash >= 0) return { domain: raw.slice(0, backslash), user: raw.slice(backslash + 1) };
 
-  const at = raw.indexOf('@');
-  if (at >= 0) return { domain: raw.slice(at + 1), user: raw.slice(0, at) };
-  return { domain: '', user: raw };
+  // A UPN or email goes in the username field whole; its suffix is not a NetBIOS domain.
+  return { domain: explicitDomain, user: raw };
 }
 
 export async function performCredSSP(
@@ -297,8 +296,9 @@ export async function performCredSSP(
   rawUsername: string,
   password: string,
   serverCertRaw: Buffer,
+  explicitDomain?: string,
 ): Promise<void> {
-  const { domain, user } = splitDomain(rawUsername);
+  const { domain, user } = splitDomain(rawUsername, explicitDomain);
   const cert = new crypto.X509Certificate(serverCertRaw);
   const subjectPublicKeyInfo = Buffer.from(cert.publicKey.export({ format: 'der', type: 'spki' }));
   const clientNonce = crypto.randomBytes(32);

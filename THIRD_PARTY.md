@@ -14,6 +14,10 @@ The SSH terminal font choices are self-hosted from the `@fontsource` packages, s
 | Roboto Mono | SIL Open Font License 1.1 |
 | Ubuntu Mono | Ubuntu Font Licence 1.0 |
 
+## Bundled: IronRDP browser backend (MIT OR Apache-2.0)
+
+The [vendored npm tarball](vendor/README.md) contains the upstream IronRDP browser backend with the SSPI fix for email-shaped Windows usernames. Both upstream license texts are included in the tarball.
+
 ## Optional: moonlight-web-stream (GPL-3.0)
 
 [moonlight-web-stream](https://github.com/MrCreativ3001/moonlight-web-stream) is used only when an operator sets `ENABLE_MOONLIGHT=1` (`true` / `yes` also work).
