@@ -47,6 +47,8 @@ export function SshSession({ tab, isActive, paneWidth, paneHeight, onStatusChang
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
   const { token } = useAuth();
   const sshPrefs = useSshPrefs();
   const [disconnected, setDisconnected] = useState(false);
@@ -161,7 +163,11 @@ export function SshSession({ tab, isActive, paneWidth, paneHeight, onStatusChang
 
   // Re-fit + focus terminal when this tab becomes active (was hidden before)
   useEffect(() => {
-    if (!isActive) return;
+    if (!isActive) {
+      // A hidden tab can keep DOM focus (Firefox), which would route pastes meant for another tab into this terminal
+      terminalRef.current?.blur();
+      return;
+    }
     const timer = setTimeout(() => {
       const fit = fitAddonRef.current;
       const term = terminalRef.current;
@@ -341,11 +347,18 @@ export function SshSession({ tab, isActive, paneWidth, paneHeight, onStatusChang
   return (
     <div
       className="absolute inset-0 bg-[#0d0d0d] flex flex-col"
+      onPasteCapture={(e) => {
+        // Defense in depth: never let an inactive tab's terminal consume a paste
+        if (!isActiveRef.current) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }}
       onContextMenu={async (e) => {
         e.preventDefault();
         const ws = wsRef.current;
         const term = terminalRef.current;
-        if (!ws || ws.readyState !== WebSocket.OPEN || !term) return;
+        if (!ws || ws.readyState !== WebSocket.OPEN || !term || !isActiveRef.current) return;
         try {
           const text = await navigator.clipboard.readText();
           // term.paste() normalizes line endings to \r and applies bracketed paste —

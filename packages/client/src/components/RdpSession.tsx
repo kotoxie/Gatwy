@@ -104,6 +104,10 @@ export function RdpSession({ tab, isActive, onStatusChange, onClose }: RdpSessio
     if (!isActive) {
       releaseInputsRef.current?.();
       setIsDraggingFiles(false);
+    } else {
+      // Drop focus left on a hidden tab's text input (e.g. an SSH terminal) so paste reaches this session
+      const stale = document.activeElement as HTMLElement | null;
+      if (stale && stale !== document.body && stale.getClientRects().length === 0) stale.blur();
     }
   }, [isActive]);
 
