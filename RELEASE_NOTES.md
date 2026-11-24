@@ -1,15 +1,9 @@
-## 🚀 What's New in 1.2.4
-
-### ✨ Features
-- 📊 **Server stats footer for SSH sessions** with a live CPU graph, shown immediately on connect, with icons and dividers.
-- ⌨️ **Unicode keyboard toggle** in the RDP session panel.
+## 🚀 What's New in 1.2.5
 
 ### 🐛 Fixes
-- SSH stats polling is now robust to shell output and transient failures.
-- The SSH stats footer now renders outside the tunnels bar.
-
-### 🔧 Other
-- Dependency upgrades.
+- RDP paste no longer leaks into background SSH sessions (#109).
+- RDP connections now retry without Display Control when a resize PDU is truncated (#105).
+- Recording retention purge now skips live sessions (#104), thanks @carlozanocco.
 
 ### 🙌 Contributors
-@kotoxie
+@kotoxie, @carlozanocco
