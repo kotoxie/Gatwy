@@ -8,6 +8,7 @@ import { decrypt } from '../services/encryption.js';
 import { applyCredential } from '../services/credentials.js';
 import { logAudit } from '../services/audit.js';
 import { logFileSessionEvent } from '../services/fileSession.js';
+import { computeFolderSize } from '../services/folderSize.js';
 import { resolveClientIp } from '../services/ip.js';
 import { connectionAccessGuard } from '../middleware/preBodyGuards.js';
 import { connectionAccessWhere } from '../services/permissions.js';
@@ -285,6 +286,45 @@ router.post('/:connectionId/stat', async (req: Request, res: Response) => {
     } catch {
       res.status(500).json({ error: e instanceof Error ? e.message : 'FTP error' });
     }
+  } finally { client?.close(); }
+});
+
+// POST /:connectionId/folder-size — recursively total a folder's size (on demand, bounded)
+router.post('/:connectionId/folder-size', async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const conn = getConn(req.params.connectionId as string, userId, req.user!.role);
+  if (!conn) { res.status(404).json({ error: 'Connection not found' }); return; }
+
+  const { path: dirPath } = req.body as { path?: unknown };
+  if (typeof dirPath !== 'string' || !dirPath || dirPath.length > 4096) { res.status(400).json({ error: 'path required' }); return; }
+
+  const abort = new AbortController();
+  res.on('close', () => { if (!res.writableEnded) abort.abort(); });
+
+  let client: ftp.Client | null = null;
+  try {
+    client = await makeFtpClient(conn);
+    const ftpClient = client;
+
+    const total = await computeFolderSize(dirPath, {
+      signal: abort.signal,
+      joinPath: (dir, name) => (dir.endsWith('/') ? `${dir}${name}` : `${dir}/${name}`),
+      listDir: async (p) => {
+        const entries = await ftpClient.list(p);
+        return entries.map((e) => ({
+          name: e.name,
+          isDirectory: e.isDirectory,
+          isSymlink: e.isSymbolicLink,
+          size: e.size,
+        }));
+      },
+    });
+
+    logFileSessionEvent({ req, userId, connectionId: req.params.connectionId as string, protocol: 'ftp', action: 'folder-size', path: dirPath, detail: { ...total } });
+    res.json(total);
+  } catch (e: unknown) {
+    console.error('[ftp] folder-size error:', e instanceof Error ? e.message : e);
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to calculate folder size' });
   } finally { client?.close(); }
 });
 

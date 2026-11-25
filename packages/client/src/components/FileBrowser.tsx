@@ -121,6 +121,13 @@ export function FileBrowser({
   const [clipboard, setClipboard] = useState<{ paths: string[]; operation: 'copy' | 'cut' } | null>(null);
   const [infoFile, setInfoFile] = useState<{ filename: string; stats: any } | null>(null);
   const [infoLoading, setInfoLoading] = useState(false);
+  const [folderSize, setFolderSize] = useState<
+    | { status: 'idle' }
+    | { status: 'loading' }
+    | { status: 'error'; message: string }
+    | { status: 'done'; size: number; files: number; folders: number; truncated: boolean }
+  >({ status: 'idle' });
+  const folderSizeAbort = useRef<AbortController | null>(null);
   const [chmodMode, setChmodMode] = useState('');
   const [sortCol, setSortCol] = useState<'name' | 'size' | 'type'>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -481,6 +488,46 @@ export function FileBrowser({
       setInfoFile(null);
     }
     setInfoLoading(false);
+  }
+
+  // Reset (and stop any running scan) when the Info dialog opens for another item or closes
+  useEffect(() => {
+    setFolderSize({ status: 'idle' });
+    return () => { folderSizeAbort.current?.abort(); folderSizeAbort.current = null; };
+  }, [infoFile?.filename]);
+
+  async function calculateFolderSize(filename: string) {
+    folderSizeAbort.current?.abort();
+    const ctrl = new AbortController();
+    folderSizeAbort.current = ctrl;
+    setFolderSize({ status: 'loading' });
+    try {
+      const res = await fetch(`${apiBase}/${connectionId}/folder-size`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(fileSessionId ? { 'X-File-Session-Id': fileSessionId } : {}) },
+        credentials: 'include',
+        body: JSON.stringify({ path: joinPath(path, filename) }),
+        signal: ctrl.signal,
+      });
+      if (ctrl.signal.aborted) return;
+      if (res.ok) {
+        const d = await res.json();
+        if (ctrl.signal.aborted) return;
+        setFolderSize({ status: 'done', size: d.size ?? 0, files: d.files ?? 0, folders: d.folders ?? 0, truncated: !!d.truncated });
+      } else {
+        let msg = 'Failed to calculate folder size';
+        try { const d = await res.json(); msg = d.error || msg; } catch { /* non-JSON response */ }
+        setFolderSize({ status: 'error', message: msg });
+      }
+    } catch {
+      if (!ctrl.signal.aborted) setFolderSize({ status: 'error', message: 'Failed to calculate folder size' });
+    }
+  }
+
+  function cancelFolderSize() {
+    folderSizeAbort.current?.abort();
+    folderSizeAbort.current = null;
+    setFolderSize({ status: 'idle' });
   }
 
   async function applyChmod() {
@@ -1063,9 +1110,40 @@ export function FileBrowser({
                   <span className="text-text-secondary">Name</span>
                   <span className="text-text-primary font-medium truncate ml-4">{infoFile.filename}</span>
                 </div>
-                <div className="flex justify-between py-1 border-b border-border/40">
+                <div className="flex justify-between items-center py-1 border-b border-border/40">
                   <span className="text-text-secondary">Size</span>
-                  <span className="text-text-primary">{formatSize(infoFile.stats.size ?? 0)}</span>
+                  {infoFile.stats.isDirectory ? (
+                    <span className="text-text-primary flex items-center gap-2 text-right">
+                      {folderSize.status === 'done' && (
+                        <span>
+                          {formatSize(folderSize.size)}{folderSize.truncated ? '+' : ''}
+                          <span className="text-text-secondary"> · {folderSize.files.toLocaleString()} files, {folderSize.folders.toLocaleString()} folders{folderSize.truncated ? ' (partial)' : ''}</span>
+                        </span>
+                      )}
+                      {folderSize.status === 'loading' && (
+                        <>
+                          <svg className="animate-spin text-text-secondary" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                          </svg>
+                          <span className="text-text-secondary">Calculating...</span>
+                          <button onClick={cancelFolderSize} className="px-2 py-0.5 text-xs border border-border rounded hover:bg-surface-alt transition-colors">
+                            Cancel
+                          </button>
+                        </>
+                      )}
+                      {folderSize.status === 'error' && <span className="text-red-400">{folderSize.message}</span>}
+                      {(folderSize.status === 'idle' || folderSize.status === 'error' || folderSize.status === 'done') && (
+                        <button
+                          onClick={() => calculateFolderSize(infoFile.filename)}
+                          className="px-2 py-0.5 text-xs border border-border rounded hover:bg-surface-alt transition-colors"
+                        >
+                          {folderSize.status === 'done' ? 'Recalculate' : 'Calculate'}
+                        </button>
+                      )}
+                    </span>
+                  ) : (
+                    <span className="text-text-primary">{formatSize(infoFile.stats.size ?? 0)}</span>
+                  )}
                 </div>
                 <div className="flex justify-between py-1 border-b border-border/40">
                   <span className="text-text-secondary">Modified</span>
