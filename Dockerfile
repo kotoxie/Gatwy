@@ -7,6 +7,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY packages/server/package.json packages/server/
 COPY packages/client/package.json packages/client/
+COPY vendor/*.tgz vendor/
 
 # Install all dependencies (--ignore-scripts skips native compilation, safe for TS build stage)
 RUN npm install --ignore-scripts
@@ -37,6 +38,7 @@ RUN chmod +x /usr/local/bin/fetch-moonlight-web
 COPY package.json package-lock.json* ./
 COPY packages/server/package.json packages/server/
 COPY packages/client/package.json packages/client/
+COPY vendor/*.tgz vendor/
 # cpu-features (ssh2 optional dep) skipped — ssh2 works without it; avoids hours of QEMU ARM64 compilation
 RUN npm install --omit=dev --ignore-scripts --workspace=packages/server
 

@@ -64,6 +64,8 @@ interface ConnectionRow {
   tags: string | null;
   skip_cert_validation: number;
   credential_id: string | null;
+  /** Present only after applyCredential() resolves a linked library credential. */
+  credential_domain?: string | null;
 }
 
 interface GroupRow {
@@ -1040,6 +1042,13 @@ router.get('/:id/session', (req: Request, res: Response) => {
 
   const password = conn.encrypted_password ? decrypt(conn.encrypted_password) : '';
 
+  // A Windows account may need an explicit domain — MicrosoftAccount for a
+  // Microsoft account address, a NetBIOS name for a domain account. The browser
+  // hands this to IronRDP as the server domain instead of guessing one from '@',
+  // which would break AD UPNs. Inline credentials have no domain field; those
+  // users can type DOMAIN\user directly.
+  const domain = conn.protocol === 'rdp' ? (conn.credential_domain ?? '') : '';
+
   // Only expose VNC pointer-scale fields — never return the full extraConfig blob.
   let vncPointerConfig: { pointerScaleX: number; pointerScaleY: number } | null = null;
   if (conn.protocol === 'vnc' && conn.extra_config_json) {
@@ -1058,6 +1067,7 @@ router.get('/:id/session', (req: Request, res: Response) => {
     port: conn.port,
     username: conn.username || '',
     password,
+    ...(domain ? { domain } : {}),
     ...(vncPointerConfig ? { extraConfig: vncPointerConfig } : {}),
   });
 });

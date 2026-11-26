@@ -401,11 +401,6 @@ export function setupRdpProxy(server: https.Server, basePath = ''): void {
       }
       trace('client.initial-parse.ok', { x224Length: x224cr.length });
 
-      const formatUsername = (username: string, domain?: string) => {
-        if (!domain || username.includes('\\') || username.includes('@')) return username;
-        return `${domain}\\${username}`;
-      };
-
       const connectBackend = (redirect?: RedirectInfo) => {
         if (redirect) redirectCount += 1;
         const generation = ++activeGeneration;
@@ -474,9 +469,10 @@ export function setupRdpProxy(server: https.Server, basePath = ''): void {
                 trace('backend.credssp.start', { generation, selectedProtocol, hasRedirectDomain: !!redirect?.domain });
                 await performCredSSP(
                   currentTls,
-                  formatUsername(redirectUser, redirect?.domain),
+                  redirectUser,
                   redirectPassword,
                   certs[0] ?? Buffer.alloc(0),
+                  redirect.domain,
                 );
                 trace('backend.credssp.done', { generation });
               }
