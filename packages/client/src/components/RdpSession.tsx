@@ -240,7 +240,7 @@ export function RdpSession({ tab, isActive, onStatusChange, onClose }: RdpSessio
           credentials: 'include',
         });
         if (!sessionRes.ok) throw new Error('Failed to fetch connection credentials');
-        const sessionInfo: { host: string; port: number; username: string; password: string } =
+        const sessionInfo: { host: string; port: number; username: string; password: string; domain?: string } =
           await sessionRes.json();
         if (cancelled) return;
 
@@ -422,6 +422,12 @@ export function RdpSession({ tab, isActive, onStatusChange, onClose }: RdpSessio
           )
           .remoteClipboardChangedCallback(clipboardService.onRemoteClipboardChanged)
           .forceClipboardUpdateCallback(clipboardService.onForceClipboardUpdate);
+
+        // Explicit domain only: an empty string would be dropped by IronRDP anyway,
+        // and a bare email must stay whole so AD UPNs keep working.
+        if (sessionInfo.domain) {
+          builder.serverDomain(sessionInfo.domain);
+        }
 
         if (!disableDisplayControlRef.current) {
           builder.extension(displayControl!(true));

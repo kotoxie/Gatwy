@@ -174,7 +174,10 @@ export function CredentialFormModal({ editing, canShare, onClose, onSaved, onCon
                 </label>
                 <input type="text" value={domain} onChange={(e) => setDomain(e.target.value)}
                   placeholder="WORKGROUP" autoComplete="off" className={inputCls} />
-                <p className="text-[11px] text-text-secondary mt-1">Used for SMB connections instead of retyping it per connection.</p>
+                <p className="text-[11px] text-text-secondary mt-1">
+                  Used for SMB connections instead of retyping it per connection. RDP sends it as the Windows domain,
+                  so a Microsoft account address can be qualified with <span className="font-mono">MicrosoftAccount</span>.
+                </p>
               </div>
             </>
           ) : (
